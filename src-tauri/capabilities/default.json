@@ -1,0 +1,19 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for the app",
+  "local": true,
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "node",
+          "cmd": "node",
+          "args": true
+        }
+      ]
+    }
+  ]
+}

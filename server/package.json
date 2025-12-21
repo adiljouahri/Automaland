@@ -1,0 +1,24 @@
+{
+  "name": "tripanel-sidecar",
+  "version": "1.0.0",
+  "description": "Node.js Sidecar for TriPanel Automator",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "bundle": "node bundle.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "chokidar": "^3.5.3",
+    "axios": "^1.6.2",
+    "archiver": "^6.0.1",
+    "fs-extra": "^11.1.1",
+    "dotenv": "^16.3.1",
+    "fast-xml-parser": "^4.3.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.0"
+  }
+}
