@@ -1,8 +1,15 @@
 import { invoke } from '@tauri-apps/api/core';
 import { AutomationFlow } from '../types';
 
+// Helper to check if running in Tauri environment
+const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
 export class LocalStoreService {
     static async init() {
+        if (!isTauri()) {
+            console.log("Web Mode detected: using localStorage instead of SQLite.");
+            return;
+        }
         try {
             await invoke('init_db');
         } catch (e) {
@@ -11,18 +18,32 @@ export class LocalStoreService {
     }
 
     static async getFlows(userId?: number): Promise<AutomationFlow[]> {
+        // Fallback for Web Mode
+        if (!isTauri()) {
+            try {
+                const stored = localStorage.getItem('local_flows_db');
+                if (!stored) return [];
+                const flows = JSON.parse(stored) as AutomationFlow[];
+                 // Hydrate dates and history
+                return flows.map(f => ({
+                    ...f,
+                    chatHistory: (f.chatHistory || []).map((c: any) => ({...c, timestamp: new Date(c.timestamp)})),
+                    strapiId: undefined
+                }));
+            } catch(e) { return []; }
+        }
+
         try {
             const flowsJson = await invoke<string>('get_local_flows');
-            const flows = JSON.parse(flowsJson) as AutomationFlow[];
+            const flows = JSON.parse(flowsJson);
             
-            // Hydrate chat history and ensure types
-            return flows.map(f => ({
+            // Hydrate chat history, ensure types, and map legacy adobeCode to appCode
+            return flows.map((f: any) => ({
                 ...f,
+                appCode: f.appCode || f.adobeCode || '', // Map adobeCode from Rust to appCode for Frontend
                 chatHistory: typeof f.chatHistory === 'string' ? JSON.parse(f.chatHistory) : f.chatHistory,
                 strapiId: undefined // Local flows don't use strapiId
-            })).filter(f => {
-                // Filter by owner if userId is provided, assuming local store might store multiple users' data? 
-                // Or usually local store is single user. We'll return all for now or filter by ownerId if present.
+            })).filter((f: AutomationFlow) => {
                 if (userId && f.ownerId && f.ownerId !== userId) return false;
                 return true;
             });
@@ -35,13 +56,37 @@ export class LocalStoreService {
     static async saveFlow(flow: AutomationFlow): Promise<void> {
         const payload = {
             ...flow,
-            chatHistory: JSON.stringify(flow.chatHistory),
-            isPublic: false // Enforce private
+            chatHistory: flow.chatHistory, // Tauri backend expects string, but we handle stringify there or here depending on logic. Rust expects string.
+            isPublic: false
         };
-        await invoke('save_local_flow', { flow: JSON.stringify(payload) });
+
+        // Fallback for Web Mode
+        if (!isTauri()) {
+            const current = await this.getFlows();
+            const index = current.findIndex(f => f.flowId === flow.flowId);
+            if (index >= 0) current[index] = flow;
+            else current.push(flow);
+            localStorage.setItem('local_flows_db', JSON.stringify(current));
+            return;
+        }
+
+        // Rust expects chatHistory as a JSON string and uses 'adobeCode' column
+        const rustPayload = {
+            ...payload,
+            adobeCode: flow.appCode, // Map appCode to adobeCode for Rust persistence
+            chatHistory: JSON.stringify(flow.chatHistory)
+        };
+
+        await invoke('save_local_flow', { flow: JSON.stringify(rustPayload) });
     }
 
     static async deleteFlow(flowId: string): Promise<void> {
+        if (!isTauri()) {
+            const current = await this.getFlows();
+            const filtered = current.filter(f => f.flowId !== flowId);
+            localStorage.setItem('local_flows_db', JSON.stringify(filtered));
+            return;
+        }
         await invoke('delete_local_flow', { flowId });
     }
 }

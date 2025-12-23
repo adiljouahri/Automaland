@@ -189,7 +189,7 @@ class ExtendScriptFacade extends events.EventEmitter {
      * High-level: Evaluate script in a specific app/engine
      * Uses the ESTK 3 Debugging Protocol XML format
      */
-    async evaluate(appSpecifier, source, engineName = "main") {
+    async evaluate(appSpecifier, source, engineName = "main", timeoutMs = 5000, waitForResponse = true) {
          if (!this.core) {
             return "Simulation Mode: Adobe Bridge not active.";
         }
@@ -205,23 +205,27 @@ class ExtendScriptFacade extends events.EventEmitter {
             const serial = this.core.esdSendDebugMessage(resolvedSpec, xmlCommand, false, 0);
             if (serial === false) return reject(new Error("Failed to send message"));
 
-            // 10-second timeout to prevent indefinite hanging
+            if (!waitForResponse) {
+                // Return immediately indicating the command was sent.
+                // The actual result should be handled via HTTP callback.
+                return resolve("Sent");
+            }
+
             const timeoutId = setTimeout(() => {
                 if (this.activeRequests.has(serial)) {
                     this.activeRequests.delete(serial);
-                    reject(new Error("Timeout: Script execution took longer than 10 seconds."));
+                    reject(new Error(`Timeout: Bridge did not acknowledge command within ${timeoutMs}ms.`));
                 }
-            }, 100);
+            }, timeoutMs);
 
-            this.activeRequests.set(serial, {
+            this.activeRequests.set(serial.serialNumber, {
                 resolve: (msg) => {
                     clearTimeout(timeoutId);
-                    // console.log(msg)
                     try {
                         const parsed = FastXML.parse(msg.body, XML_OPTIONS);
-                        resolve(parsed.evalresult);
+                        console.log(parsed)
+                        resolve(parsed.evalresult['value']['#value']);
                     } catch (e) {
-                        // Return raw body if XML parsing fails
                         resolve(msg.body);
                     }
                 },

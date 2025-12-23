@@ -1,3 +1,4 @@
+
 const esbuild = require('esbuild');
 const fs = require('fs-extra');
 const path = require('path');
@@ -32,15 +33,26 @@ async function bundle() {
         external: ['fsevents', '*.node'], 
     });
 
-    // --- COPY FULL LIB FOLDER ---
+    // --- COPY FULL LIB FOLDER (Native Modules) ---
     console.log("📦 Copying Lib Folder...");
     const srcLib = path.join(__dirname, 'lib');
     const destLib = path.join(__dirname, 'dist', 'lib');
     
-    if (fs.existsSync(srcLib)) {
-        copyFolderRecursive(srcLib, destLib);
+    // if (fs.existsSync(srcLib)) {
+    //     copyFolderRecursive(srcLib, destLib);
+    // } else {
+    //     console.warn("⚠️ 'lib' folder not found in server root.");
+    // }
+
+    // --- COPY JSX FOLDER (Standard Scripts) ---
+    console.log("📦 Copying JSX Folder...");
+    const srcJsx = path.join(__dirname, 'jsx');
+    const destJsx = path.join(__dirname, 'dist', 'jsx');
+    console.log(srcJsx)
+    if (fs.existsSync(srcJsx)) {
+        copyFolderRecursive(srcJsx, destJsx);
     } else {
-        console.warn("⚠️ 'lib' folder not found in server root.");
+        console.warn("⚠️ 'jsx' folder not found in server root. (Optional if not using custom standard libs)");
     }
 
     console.log("✅ Build Complete: dist/server-sidecar.cjs");
@@ -60,12 +72,13 @@ async function bundle() {
         // Copy the full lib folder to the target as well
         const debugLib = path.join(debugTarget, 'lib');
         if (fs.existsSync(destLib)) {
-            // try{
+             copyFolderRecursive(destLib, debugLib);
+        }
 
-            //     copyFolderRecursive(destLib, debugLib);
-            // }catch(err){
-            //     console.log(err.message)
-            // }
+        // Copy the full jsx folder to the target as well
+        const debugJsx = path.join(debugTarget, 'jsx');
+        if (fs.existsSync(destJsx)) {
+             copyFolderRecursive(destJsx, debugJsx);
         }
 
         console.log("   -> Copied successfully.");

@@ -56,7 +56,7 @@ export const LogConsole: React.FC<LogConsoleProps> = ({ logs, isRunning, theme =
                 </span>
                 <span className={`text-xs font-bold uppercase w-12 shrink-0 ${
                     log.source === 'NODE' ? 'text-green-500' :
-                    log.source === 'ADOBE' ? 'text-blue-500' :
+                    log.source === 'HOST' ? 'text-blue-500' :
                     log.source === 'UI' ? 'text-yellow-500' : 'text-slate-400'
                 }`}>
                     [{log.source}]

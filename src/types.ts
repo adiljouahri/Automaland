@@ -1,9 +1,18 @@
+
 export interface LogEntry {
   id: string;
   timestamp: string;
-  source: 'SYSTEM' | 'NODE' | 'ADOBE' | 'UI';
+  source: 'SYSTEM' | 'NODE' | 'HOST' | 'UI';
   message: string;
   type: 'info' | 'error' | 'success';
+}
+
+export interface FlowVersion {
+  timestamp: number;
+  name: string;
+  uiSchema: string;
+  nodeCode: string;
+  appCode: string;
 }
 
 export interface AutomationFlow {
@@ -13,7 +22,7 @@ export interface AutomationFlow {
   name: string;
   uiSchema: string;
   nodeCode: string;
-  adobeCode: string;
+  appCode: string;
   targetApp: string;
   targetAppPath?: string;
   simulatedLogs?: string[];
@@ -21,6 +30,8 @@ export interface AutomationFlow {
   createdAt: number;
   isPublic?: boolean;
   ownerId?: number;
+  history?: FlowVersion[]; // Version control
+  executionTimeout?: number; // Timeout in seconds
 }
 
 export interface User {
@@ -34,7 +45,7 @@ export interface AuthResponse {
   user: User;
 }
 
-export interface AdobeAppConfig {
+export interface HostAppConfig {
   id: string;
   name: string;
   path?: string;
@@ -75,10 +86,10 @@ export interface EnvVariable {
 
 export interface WatcherConfig {
   id: string;
-  type: 'FOLDER' | 'API';
-  target: string;
+  type: 'FOLDER' | 'API' | 'SCHEDULE';
+  target: string; // Folder path OR Description for schedule
+  interval?: number; // Seconds for schedule
   flowId: string; // The flow to trigger
-  interval?: number;
   active: boolean;
 }
 

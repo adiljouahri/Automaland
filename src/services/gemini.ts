@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { AutomationFlow } from "../types";
 
@@ -46,20 +45,20 @@ export const generateAutomationFlow = async (
       name: { type: Type.STRING, description: "A short, catchy name for this flow" },
       uiSchema: { type: Type.STRING, description: "Valid JSON Schema object serialized as a string" },
       nodeCode: { type: Type.STRING, description: "The Node.js javascript code" },
-      adobeCode: { type: Type.STRING, description: "The ExtendScript (JSX) code for the creative app" },
+      appCode: { type: Type.STRING, description: "The ExtendScript (JSX) code for the creative app" },
       simulatedLogs: { 
         type: Type.ARRAY, 
         items: { type: Type.STRING },
         description: "A list of strings representing the console output during a successful run."
       }
     },
-    required: ["name", "uiSchema", "nodeCode", "adobeCode", "simulatedLogs"]
+    required: ["name", "uiSchema", "nodeCode", "appCode", "simulatedLogs"]
   };
 
   const userPrompt = currentFlow 
     ? `Update the current flow based on this request: "${prompt}". 
        Current Node Code: ${currentFlow.nodeCode.substring(0, 500)}...
-       Current ExtendScript Code: ${currentFlow.adobeCode.substring(0, 500)}...`
+       Current ExtendScript Code: ${currentFlow.appCode.substring(0, 500)}...`
     : `Create a new automation flow for: "${prompt}"`;
 
   try {

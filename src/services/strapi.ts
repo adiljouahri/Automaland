@@ -1,4 +1,5 @@
 import { AuthResponse, AutomationFlow, User } from "../types";
+
 export class StrapiService {
   private baseUrl: string;
   private token: string | null = null;
@@ -94,8 +95,17 @@ export class StrapiService {
 
       return (json.data || []).map((item: any) => {
         let id = item.id;
-        // Apply ID fix if env var is not set to true
-        // if (DISABLE_STRAPI_ID_FIX !== 'true') id = id - 1;
+        
+        // Safely check for env variable to disable ID fix
+        let disableIdFix = false;
+        try {
+            // @ts-ignore
+            if (typeof process !== 'undefined' && process.env && process.env.DISABLE_STRAPI_ID_FIX === 'true') {
+                disableIdFix = true;
+            }
+        } catch(e) {}
+
+        if (!disableIdFix) id = id - 1;
 
         const attrs = item.attributes || item; 
         
@@ -113,7 +123,7 @@ export class StrapiService {
           name: attrs.name || 'Untitled Flow',
           uiSchema: attrs.uiSchema || '{}',
           nodeCode: attrs.nodeCode || '',
-          adobeCode: attrs.adobeCode || '',
+          appCode: attrs.adobeCode || attrs.appCode || '', // Map adobeCode or appCode
           targetApp: attrs.targetApp || 'photoshop',
           isPublic: true,
           ownerId: ownerId,
@@ -146,7 +156,7 @@ export class StrapiService {
         name: flow.name,
         uiSchema: flow.uiSchema,
         nodeCode: flow.nodeCode,
-        adobeCode: flow.adobeCode,
+        adobeCode: flow.appCode, // Send appCode as adobeCode for backward compatibility if backend expects it
         targetApp: flow.targetApp,
         chatHistory: JSON.stringify(flow.chatHistory),
         flowId: flow.flowId,

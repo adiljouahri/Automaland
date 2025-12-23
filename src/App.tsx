@@ -1,6 +1,7 @@
-
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2 } from 'lucide-react';
+import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core'; // Import invoke from Tauri
+import { save } from '@tauri-apps/plugin-dialog';
 import { CodeEditor } from './components/CodeEditor';
 import { FormRenderer } from './components/FormRenderer';
 import { LogConsole } from './components/LogConsole';
@@ -8,8 +9,8 @@ import { SettingsModal } from './components/SettingsModal';
 import { generateAutomationFlow } from './services/ai';
 import { StrapiService } from './services/strapi';
 import { LocalStoreService } from './services/local';
-import { AutomationFlow, LogEntry, ChatMessage, AppStatus, AppSettings, EnvVariable, WatcherConfig, NpmPackage, AdobeAppConfig, User } from './types';
-import { INITIAL_UI_SCHEMA, INITIAL_NODE_CODE, INITIAL_ADOBE_CODE } from './constants';
+import { AutomationFlow, LogEntry, ChatMessage, AppStatus, AppSettings, EnvVariable, WatcherConfig, NpmPackage, HostAppConfig, User, FlowVersion } from './types';
+import { INITIAL_UI_SCHEMA, INITIAL_NODE_CODE, INITIAL_APP_CODE } from './constants';
 
 function App() {
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -19,15 +20,72 @@ function App() {
       aiApiKey: '',
       aiProvider: 'gemini',
       aiModel: 'gemini-3-pro-preview',
-      serverUrl: 'http://localhost:3031',
+      serverUrl: 'http://localhost:3001',
       strapiUrl: 'http://localhost:1337',
       theme: 'dark'
     };
   });
 
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const addLog = useCallback((msg: string, source: LogEntry['source'], type: LogEntry['type'] = 'info') => {
+      setLogs(prev => [...prev, { id: Math.random().toString(36), timestamp: new Date().toLocaleTimeString(), source, message: msg, type }]);
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('app_settings', JSON.stringify(settings));
   }, [settings]);
+
+  // --- SYNC SERVER PORT (POLLING) ---
+  useEffect(() => {
+      let attempts = 0;
+      const maxAttempts = 15; // Try for 15 seconds
+      let synced = false;
+
+      const syncPort = async () => {
+          try {
+              // Only check for server config if in Tauri mode
+              if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+                  const configStr = await invoke<string>('get_server_config');
+                  if (configStr && configStr !== '{}') {
+                      const config = JSON.parse(configStr);
+                      if (config.url && config.port) {
+                          setSettings(prev => {
+                              if (prev.serverUrl !== config.url) {
+                                  addLog(`Synced Server Port: ${config.url}`, "SYSTEM", "success");
+                                  return { ...prev, serverUrl: config.url };
+                              }
+                              return prev;
+                          });
+                          return true;
+                      }
+                  }
+              }
+          } catch (e) {
+              // Ignore in web mode
+          }
+          return false;
+      };
+
+      // Initial check
+      syncPort();
+
+      // Poll every 1s
+      const interval = setInterval(async () => {
+          attempts++;
+          if (synced || attempts >= maxAttempts) {
+              clearInterval(interval);
+              return;
+          }
+          
+          const success = await syncPort();
+          if (success) {
+              synced = true;
+              clearInterval(interval);
+          }
+      }, 1000);
+
+      return () => clearInterval(interval);
+  }, []); 
   
   const strapi = useMemo(() => new StrapiService(settings.strapiUrl), [settings.strapiUrl]);
   const [user, setUser] = useState<User | null>(null);
@@ -35,10 +93,21 @@ function App() {
   const [authData, setAuthData] = useState({ identifier: '', password: '', email: '', username: '' });
   
   const [envVars, setEnvVars] = useState<EnvVariable[]>([]);
-  const [watchers, setWatchers] = useState<WatcherConfig[]>([]);
+  
+  // Watchers: Load from localStorage on init
+  const [watchers, setWatchers] = useState<WatcherConfig[]>(() => {
+      const saved = localStorage.getItem('app_watchers');
+      if (saved) {
+          try { return JSON.parse(saved); } catch(e) {}
+      }
+      return [];
+  });
+
   const [packages, setPackages] = useState<NpmPackage[]>([]);
   const [showSettings, setShowSettings] = useState(false);
-  const [availableApps, setAvailableApps] = useState<AdobeAppConfig[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [availableApps, setAvailableApps] = useState<HostAppConfig[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [viewMode, setViewMode] = useState<'editor' | 'grid'>('editor');
   
@@ -48,7 +117,7 @@ function App() {
     name: 'Default Automation',
     uiSchema: INITIAL_UI_SCHEMA,
     nodeCode: INITIAL_NODE_CODE,
-    adobeCode: INITIAL_ADOBE_CODE,
+    appCode: INITIAL_APP_CODE,
     targetApp: 'photoshop',
     simulatedLogs: [],
     isPublic: false,
@@ -58,12 +127,13 @@ function App() {
       text: 'Hello! I am your AI Architect. Try: "Watch a folder for JPGs, watermark them in Photoshop, and upload to S3."',
       timestamp: new Date()
     }],
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    history: [],
+    executionTimeout: 10
   }]);
-console.log(flows)
+
   const [activeFlowId, setActiveFlowId] = useState<string>('default-flow-1');
   
-  // Robust Active Flow Resolution
   const activeFlow = useMemo(() => {
     const found = flows.find(f => f.id === activeFlowId);
     if (found) return found;
@@ -75,17 +145,18 @@ console.log(flows)
         name: 'No Flow Selected',
         uiSchema: INITIAL_UI_SCHEMA,
         nodeCode: INITIAL_NODE_CODE,
-        adobeCode: INITIAL_ADOBE_CODE,
+        appCode: INITIAL_APP_CODE,
         targetApp: 'photoshop',
         simulatedLogs: [],
         isPublic: false,
         chatHistory: [],
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        history: [],
+        executionTimeout: 10
     } as AutomationFlow;
   }, [flows, activeFlowId]);
 
   const isFallback = activeFlow.id === 'fallback-flow';
-  // Allow editing if you are owner OR if it's a private flow (legacy/local support)
   const isOwner = isFallback ? false : (activeFlow?.ownerId === user?.id || !activeFlow?.ownerId || !activeFlow.isPublic);
   
   const [sidebarTab, setSidebarTab] = useState<'chat' | 'flows'>('chat');
@@ -93,7 +164,6 @@ console.log(flows)
 
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [formData, setFormData] = useState<Record<string, any>>({});
-  const [logs, setLogs] = useState<LogEntry[]>([]);
   
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -103,14 +173,6 @@ console.log(flows)
   const isSavingRef = useRef(false);
   const isDark = settings.theme === 'dark';
 
-  const addLog = useCallback((msg: string, source: LogEntry['source'], type: LogEntry['type'] = 'info') => {
-      setLogs(prev => [...prev, { id: Math.random().toString(36), timestamp: new Date().toLocaleTimeString(), source, message: msg, type }]);
-  }, []);
-
-  /**
-   * Safe Server Request Wrapper
-   * Intercepts fetch errors and logs them to the UI console.
-   */
   const safeServerRequest = useCallback(async (endpoint: string, options?: RequestInit) => {
     try {
         const url = `${settings.serverUrl}${endpoint}`;
@@ -126,12 +188,9 @@ console.log(flows)
     }
   }, [settings.serverUrl, addLog]);
 
-  // --- Real-time Log Streaming from Server ---
   useEffect(() => {
     if (!settings.serverUrl) return;
-
     const eventSource = new EventSource(`${settings.serverUrl}/api/logs`);
-    
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -142,23 +201,12 @@ console.log(flows)
             message: data.message, 
             type: data.type || 'info' 
         }]);
-      } catch (e) {
-        // Ignore parse errors from heartbeat
-      }
+      } catch (e) {}
     };
-
-    eventSource.onerror = (e) => {
-        // We don't want to spam logs on normal disconnects, but useful for debugging
-        // console.error("SSE Error", e);
-        eventSource.close();
-    };
-
-    return () => {
-        eventSource.close();
-    };
+    eventSource.onerror = (e) => { eventSource.close(); };
+    return () => { eventSource.close(); };
   }, [settings.serverUrl]);
 
-  // Init Local DB on Mount
   useEffect(() => {
     LocalStoreService.init().catch(e => console.error("DB Init error", e));
   }, []);
@@ -214,10 +262,8 @@ console.log(flows)
 
   const handleSaveFlow = async (flowToSave?: AutomationFlow) => {
     if (isSavingRef.current) return;
-
     const target = flowToSave || activeFlow;
     if (target.id === 'fallback-flow') return;
-
     if (!target.flowId) target.flowId = crypto.randomUUID();
 
     isSavingRef.current = true;
@@ -228,14 +274,23 @@ console.log(flows)
             if (!strapi.isAuthenticated()) throw new Error("Must be logged in to save public flows.");
             await strapi.savePublicFlow(target);
             await LocalStoreService.deleteFlow(target.flowId);
-            addLog(`Flow "${target.name}" published to Cloud.`, "SYSTEM", "success");
+            addLog(`Flow "${target.name}" published/updated to Cloud.`, "SYSTEM", "success");
         } else {
             if (!target.ownerId && user) target.ownerId = user.id;
-            await LocalStoreService.saveFlow(target);
+            const newVersion: FlowVersion = {
+                timestamp: Date.now(),
+                name: target.name,
+                nodeCode: target.nodeCode,
+                appCode: target.appCode,
+                uiSchema: target.uiSchema
+            };
+            const updatedHistory = [newVersion, ...(target.history || [])].slice(0, 15);
+            const flowWithHistory = { ...target, history: updatedHistory };
+            await LocalStoreService.saveFlow(flowWithHistory);
+            updateActiveFlow({ history: updatedHistory });
             if (strapi.isAuthenticated()) await strapi.deletePublicFlow(target.flowId);
-            addLog(`Flow "${target.name}" saved locally.`, "SYSTEM", "success");
+            addLog(`Flow "${target.name}" saved locally (Version captured).`, "SYSTEM", "success");
         }
-        await loadAllFlows();
     } catch (e: any) {
       addLog(`Failed to save: ${e.message}`, "SYSTEM", "error");
     } finally {
@@ -244,18 +299,119 @@ console.log(flows)
     }
   };
 
+  const handleExportJSON = async () => {
+    const exportData = {
+        ...activeFlow,
+        history: [], // Keep export light
+        id: undefined // Don't export React ID
+    };
+    const content = JSON.stringify(exportData, null, 2);
+
+    // Native Tauri File Save
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      try {
+        const filePath = await save({
+          filters: [{
+            name: 'JSON',
+            extensions: ['json']
+          }],
+          defaultPath: `${activeFlow.name.replace(/\s+/g, '_')}_export.json`
+        });
+
+        if (filePath) {
+          // Use custom Rust command to write file
+          await invoke('save_text_file', { path: filePath, content });
+          addLog(`Exported Flow to ${filePath}`, "SYSTEM", "success");
+        }
+      } catch (e: any) {
+        addLog(`Export Failed: ${e.message}`, "SYSTEM", "error");
+      }
+    } else {
+      // Browser Fallback
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(content);
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", `${activeFlow.name.replace(/\s+/g, '_')}_export.json`);
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+      addLog("Exported Flow to JSON (Browser Download).", "SYSTEM", "info");
+    }
+  };
+
+  const handleImportJSON = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const fileReader = new FileReader();
+    if (event.target.files && event.target.files.length > 0) {
+        fileReader.readAsText(event.target.files[0], "UTF-8");
+        fileReader.onload = async (e) => {
+            try {
+                if (e.target?.result) {
+                    const parsed = JSON.parse(e.target.result as string);
+                    if (!parsed.nodeCode || !parsed.uiSchema) throw new Error("Invalid Flow JSON");
+                    
+                    const newId = `imported-${Date.now()}`;
+                    const importedFlow: AutomationFlow = {
+                        ...parsed,
+                        id: newId,
+                        flowId: crypto.randomUUID(), // New UUID for import
+                        name: `${parsed.name} (Imported)`,
+                        ownerId: user?.id,
+                        isPublic: false,
+                        createdAt: Date.now(),
+                        history: [],
+                        chatHistory: parsed.chatHistory || []
+                    };
+                    
+                    setFlows(prev => [importedFlow, ...prev]);
+                    setActiveFlowId(newId);
+                    await LocalStoreService.saveFlow(importedFlow);
+                    addLog("Imported Flow successfully.", "SYSTEM", "success");
+                }
+            } catch (err) {
+                addLog("Failed to import JSON.", "SYSTEM", "error");
+            }
+        };
+    }
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleRestoreVersion = (v: FlowVersion) => {
+      if(!confirm(`Restore version from ${new Date(v.timestamp).toLocaleString()}? Unsaved changes will be lost.`)) return;
+      updateActiveFlow({
+          name: v.name,
+          nodeCode: v.nodeCode,
+          appCode: v.appCode,
+          uiSchema: v.uiSchema
+      });
+      setShowHistory(false);
+      addLog(`Restored version from ${new Date(v.timestamp).toLocaleTimeString()}`, "SYSTEM", "info");
+  };
+
+  // --- PERSIST WATCHERS ---
   useEffect(() => {
-    if (watchers.length > 0) {
-      const configs = watchers.map(w => {
+      localStorage.setItem('app_watchers', JSON.stringify(watchers));
+  }, [watchers]);
+
+  // --- SYNC WATCHERS WITH SERVER ---
+  useEffect(() => {
+    // Filter only active watchers
+    const activeWatchersList = watchers.filter(w => w.active);
+    
+    // Even if list is empty, we send it so server stops removed/inactive watchers
+    if (true) {
+      const configs = activeWatchersList.map(w => {
         const flow = flows.find(f => f.id === w.flowId);
+        console.log(flow)
         return {
           id: w.id,
           target: w.target,
-          flowContext: flow ? { code: flow.nodeCode, targetApp: flow.targetApp } : null
+          type: w.type || 'FOLDER',
+          interval: w.interval,
+          flowContext: flow ? { code: flow.nodeCode, targetApp: flow.targetApp, appCode: flow.appCode } : null
         };
       }).filter(c => c.flowContext !== null);
 
-      // Use safeServerRequest
       safeServerRequest('/api/watchers/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -263,17 +419,40 @@ console.log(flows)
           configs,
           envVars: envVars.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {})
         })
-      }).catch(() => {}); // Error already logged by safeServerRequest
+      }).catch(() => {});
     }
   }, [watchers, flows, envVars, safeServerRequest]);
 
-  const handleTogglePublic = async () => {
+  const handlePublish = async () => {
     if (!isOwner || isFallback) return;
-    const newStatus = !activeFlow.isPublic;
-    const updatedFlow = { ...activeFlow, isPublic: newStatus };
-    updateActiveFlow({ isPublic: newStatus });
-    addLog(`Moving flow to ${newStatus ? 'Public Cloud' : 'Local Storage'}...`, "SYSTEM", "info");
+    if (!strapi.isAuthenticated()) {
+        alert("Please login to publish flows.");
+        return;
+    }
+    if(!confirm("Publish to Public Cloud? This will make the flow visible to everyone. You can't undo this action (only delete).")) return;
+    const updatedFlow = { ...activeFlow, isPublic: true };
+    updateActiveFlow({ isPublic: true });
     await handleSaveFlow(updatedFlow);
+  };
+
+  const handleImport = async () => {
+    const newId = `private-${crypto.randomUUID()}`;
+    const newFlowId = crypto.randomUUID();
+    const importedFlow: AutomationFlow = {
+        ...activeFlow,
+        id: newId,
+        flowId: newFlowId,
+        name: `${activeFlow.name} (Imported)`,
+        isPublic: false,
+        ownerId: user?.id,
+        createdAt: Date.now(),
+        strapiId: undefined,
+        history: [] 
+    };
+    setFlows(prev => [importedFlow, ...prev]);
+    setActiveFlowId(newId);
+    await LocalStoreService.saveFlow(importedFlow);
+    addLog(`Imported "${activeFlow.name}" to local library.`, "SYSTEM", "success");
   };
 
   const handleDuplicateFlow = () => {
@@ -286,7 +465,8 @@ console.log(flows)
          ownerId: user?.id,
          name: `${activeFlow.name} (Copy)`,
          isPublic: false,
-         createdAt: Date.now()
+         createdAt: Date.now(),
+         history: []
      };
      setFlows(prev => [copy, ...prev]);
      setActiveFlowId(newId);
@@ -317,24 +497,24 @@ console.log(flows)
         name: 'Default Automation',
         uiSchema: INITIAL_UI_SCHEMA,
         nodeCode: INITIAL_NODE_CODE,
-        adobeCode: INITIAL_ADOBE_CODE,
+        appCode: INITIAL_APP_CODE,
         targetApp: 'photoshop',
         simulatedLogs: [],
         isPublic: false,
         chatHistory: [],
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        history: [],
+        executionTimeout: 10
     }]);
     setActiveFlowId('default-flow-1');
   };
 
   useEffect(() => {
       let mounted = true;
-      // Use safeServerRequest
       safeServerRequest('/api/adobe/apps')
         .then(res => res.json())
         .then(data => { if (mounted) setAvailableApps(data); })
         .catch(() => {
-            // Safe request logs the error, but we can set default UI state
             if (mounted) {
                 setAvailableApps([
                     { id: 'photoshop', name: 'Photoshop', specifier: 'photoshop' },
@@ -369,13 +549,15 @@ console.log(flows)
       name: 'New Untitled Flow',
       uiSchema: INITIAL_UI_SCHEMA,
       nodeCode: INITIAL_NODE_CODE,
-      adobeCode: INITIAL_ADOBE_CODE,
+      appCode: INITIAL_APP_CODE,
       targetApp: defaultApp,
       targetAppPath: defaultApp,
       isPublic: false,
       ownerId: user?.id,
       chatHistory: [{ id: 'init', role: 'model', text: 'New flow created. What should we build?', timestamp: new Date() }],
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      history: [],
+      executionTimeout: 10
     };
     setFlows(prev => [newFlow, ...prev]);
     setActiveFlowId(newId);
@@ -388,7 +570,6 @@ console.log(flows)
     if (flows.length <= 1) return;
     const flowToDelete = flows.find(f => f.id === id);
     if (!flowToDelete) return;
-
     try {
         if (flowToDelete.isPublic) {
              if(strapi.isAuthenticated()) await strapi.deletePublicFlow(flowToDelete.flowId);
@@ -431,20 +612,24 @@ console.log(flows)
     setStatus(AppStatus.RUNNING);
     addLog(`Starting '${entryPoint}'...`, "SYSTEM");
     try {
-       const nodePayload = { code: targetFlow.nodeCode, triggerData: formData, envVars: envVars.reduce((acc, curr) => ({...acc, [curr.key]: curr.value}), {}), entryPoint, targetApp: targetFlow.targetApp };
-       
-       // Use safeServerRequest
+       const nodePayload = { 
+           code: targetFlow.nodeCode, 
+           triggerData: formData, 
+           envVars: envVars.reduce((acc, curr) => ({...acc, [curr.key]: curr.value}), {}), 
+           entryPoint, 
+           targetApp: targetFlow.targetApp,
+           timeout: targetFlow.executionTimeout || 10,
+           appCode: targetFlow.appCode // Pass the ExtendScript code to the backend
+       };
        const res = await safeServerRequest('/api/execute/node', { 
            method: 'POST', 
            headers: {'Content-Type': 'application/json'}, 
            body: JSON.stringify(nodePayload) 
        });
-       
        const nodeResponse = await res.json();
        if (!nodeResponse.success) throw new Error(nodeResponse.error || "Node.js Execution Failed");
        addLog(`Action completed.`, "NODE", "success");
     } catch(e: any) { 
-        // Error already logged by safeServerRequest, but we might want to ensure 'status' is reset
     } finally { setStatus(AppStatus.IDLE); }
   };
 
@@ -460,7 +645,6 @@ console.log(flows)
   const textSecondary = isDark ? "text-slate-400" : "text-slate-500";
   const borderPrimary = isDark ? "border-slate-800" : "border-slate-200";
   const bgHeader = isDark ? "bg-slate-900" : "bg-white border-b border-slate-200";
-
   const filteredFlows = useMemo(() => flows.filter(f => {
     if (flowListFilter === 'mine') return f.ownerId === user?.id;
     if (flowListFilter === 'public') return f.isPublic === true;
@@ -494,6 +678,38 @@ console.log(flows)
   return (
     <div className={`flex h-screen overflow-hidden ${bgMain} ${textPrimary} font-sans transition-colors duration-300`}>
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} settings={settings} onSaveSettings={setSettings} envVars={envVars} setEnvVars={setEnvVars} watchers={watchers} setWatchers={setWatchers} packages={packages} setPackages={setPackages} availableFlows={flows.filter(f => f.ownerId === user?.id || !f.ownerId)} />
+      
+      {/* HIDDEN FILE INPUT FOR IMPORT */}
+      <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleImportJSON} />
+
+      {showHistory && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center" onClick={() => setShowHistory(false)}>
+              <div className={`w-[500px] h-[600px] rounded-xl flex flex-col overflow-hidden shadow-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`} onClick={e => e.stopPropagation()}>
+                  <div className={`p-4 border-b flex items-center justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-100 bg-slate-50'}`}>
+                      <h3 className="font-bold flex items-center gap-2"><Clock className="w-4 h-4"/> Version History</h3>
+                      <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-red-400 font-bold">&times;</button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                      {activeFlow.history && activeFlow.history.length > 0 ? (
+                          activeFlow.history.map((ver, idx) => (
+                              <div key={ver.timestamp} className={`p-3 rounded border flex justify-between items-center ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+                                  <div>
+                                      <div className="text-sm font-bold">{new Date(ver.timestamp).toLocaleString()}</div>
+                                      <div className="text-xs text-slate-500">{ver.nodeCode.length} chars • {ver.name}</div>
+                                  </div>
+                                  <button onClick={() => handleRestoreVersion(ver)} className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs flex items-center gap-1">
+                                      <Undo className="w-3 h-3" /> Restore
+                                  </button>
+                              </div>
+                          ))
+                      ) : (
+                          <div className="p-8 text-center text-slate-500 text-sm">No history available for this flow yet. Save changes to create versions.</div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
       <div className={`w-80 flex flex-col ${borderPrimary} ${bgSidebar}`}>
         <div className={`flex border-b ${borderPrimary}`}>
           <button onClick={() => setSidebarTab('chat')} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${sidebarTab === 'chat' ? 'bg-slate-800/50 text-blue-400 border-b-2 border-blue-500' : textSecondary}`}><MessageSquare className="w-4 h-4" /> Chat</button>
@@ -529,16 +745,63 @@ console.log(flows)
           )}
           </div>
           <div className="flex items-center gap-3">
-            {isOwner && <button onClick={handleTogglePublic} disabled={isSaving || isFallback} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border ${activeFlow.isPublic ? 'bg-green-600/10 text-green-400 border-green-500/50' : (isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300')} ${isSaving || isFallback ? 'opacity-50 cursor-not-allowed' : ''}`}>{activeFlow.isPublic ? <><Globe className="w-3.5 h-3.5" /> Public</> : <><Lock className="w-3.5 h-3.5" /> Private</>}</button>}
+            {/* Watcher Indicator */}
+            {watchers.length > 0 && watchers.some(w => w.active) && (
+                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30 text-green-500 text-xs font-bold animate-pulse" title="Watchers are active and scanning...">
+                     <Eye className="w-3.5 h-3.5" /> Watching
+                 </div>
+            )}
+            
+            {/* IMPORT / EXPORT BUTTONS */}
+            <div className="flex items-center border-r border-slate-700 pr-3 mr-1 gap-1">
+                <button onClick={handleExportJSON} title="Export Flow to JSON" className={`p-1.5 rounded transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-200'}`}>
+                    <FileJson className="w-4 h-4" />
+                </button>
+                <button onClick={() => fileInputRef.current?.click()} title="Import Flow from JSON" className={`p-1.5 rounded transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-200'}`}>
+                    <Import className="w-4 h-4" />
+                </button>
+            </div>
+
+            {!activeFlow.isPublic ? (
+                 isOwner && (
+                     <button onClick={handlePublish} disabled={isSaving || isFallback} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border transition-colors hover:bg-green-600 hover:text-white ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'} ${isSaving || isFallback ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                         <CloudUpload className="w-3.5 h-3.5" /> Publish
+                     </button>
+                 )
+            ) : (
+                 <button onClick={handleImport} disabled={isSaving || isFallback} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border bg-purple-600 hover:bg-purple-500 text-white border-transparent shadow-lg ${isSaving || isFallback ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                     <Import className="w-3.5 h-3.5" /> Import
+                 </button>
+            )}
+
             <button onClick={() => setViewMode(prev => prev === 'editor' ? 'grid' : 'editor')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'}`}>{viewMode === 'editor' ? <><LayoutGrid className="w-3.5 h-3.5" /> Dashboard</> : <><Edit3 className="w-3.5 h-3.5" /> Editor</>}</button>
             <button onClick={handleCreateNewFlow} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'}`}><Plus className="w-3.5 h-3.5" /> New</button>
-            <button onClick={() => handleSaveFlow()} disabled={isSaving || isFallback} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition-all ${isSaving || isFallback ? 'opacity-70 cursor-not-allowed' : ''}`}>
-              {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (isOwner ? <Download className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />)} 
-              {isSaving ? 'Saving...' : (isOwner ? 'Save' : 'Duplicate')}
-            </button>
+            
+            <div className="flex items-center rounded-lg shadow-sm border overflow-hidden border-blue-600">
+                <button onClick={() => handleSaveFlow()} disabled={isSaving || isFallback || !isOwner} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-all ${isSaving || isFallback || !isOwner ? 'opacity-70 cursor-not-allowed' : ''}`}>
+                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 
+                {isSaving ? 'Saving...' : 'Save'}
+                </button>
+                {isOwner && (
+                    <button onClick={() => setShowHistory(true)} className="px-2 py-1.5 bg-blue-700 hover:bg-blue-600 text-white border-l border-blue-500 transition-colors" title="Version History">
+                        <History className="w-3.5 h-3.5" />
+                    </button>
+                )}
+            </div>
+
             <div className="flex items-center gap-2 px-2 py-1 bg-slate-800/50 rounded-lg border border-slate-700"><UserIcon className="w-4 h-4 text-blue-400" /><span className="text-xs font-medium">{user?.username}</span><button onClick={handleLogout} className="text-red-400 hover:text-red-500"><LogOut className="w-3.5 h-3.5" /></button></div>
             <button onClick={() => setShowSettings(true)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-800"><Settings className="w-5 h-5" /></button>
-            <button onClick={() => handleRun('run')} disabled={status !== AppStatus.IDLE || isFallback} className="flex items-center gap-2 px-5 py-2 rounded-lg font-bold text-sm bg-green-600 hover:bg-green-500 text-white shadow-lg transition-all disabled:opacity-50"><Play className="w-4 h-4 fill-current" /> Run</button>
+            
+            <div className="flex items-center gap-1">
+                <input 
+                    type="number" 
+                    title="Timeout in Seconds"
+                    value={activeFlow.executionTimeout || 10}
+                    onChange={(e) => updateActiveFlow({ executionTimeout: parseInt(e.target.value) || 10 })}
+                    className={`w-12 py-2 text-center text-xs font-bold rounded-l-lg border-y border-l ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'} focus:outline-none`}
+                />
+                <button onClick={() => handleRun('run')} disabled={status !== AppStatus.IDLE || isFallback} className="flex items-center gap-2 px-4 py-2 rounded-r-lg font-bold text-sm bg-green-600 hover:bg-green-500 text-white shadow-lg transition-all disabled:opacity-50"><Play className="w-4 h-4 fill-current" /> Run</button>
+            </div>
           </div>
         </header>
         {viewMode === 'editor' ? (
@@ -555,38 +818,33 @@ console.log(flows)
             />
             <CodeEditor title="Node.js Orchestrator" language="javascript" icon={<Cpu className="w-4 h-4" />} code={activeFlow.nodeCode} readonly={false} onChange={(code) => updateActiveFlow({ nodeCode: code })} theme={settings.theme} />
             <CodeEditor 
-                title="Creative App Panel" 
+                title="Host App Code (ExtendScript)" 
                 language="javascript" 
                 icon={<ImageIcon className="w-4 h-4" />} 
-                code={activeFlow.adobeCode} 
+                code={activeFlow.appCode} 
                 readonly={false} 
-                onChange={(code) => updateActiveFlow({ adobeCode: code })} 
+                onChange={(code) => updateActiveFlow({ appCode: code })} 
                 theme={settings.theme} 
                 extraHeaderContent={
                   <div className="flex items-center gap-2">
                     <select 
                         value={activeFlow.targetApp || ''}
                         disabled={!isOwner} 
-                        onPointerDown={(e) => e.stopPropagation()} // Prevent drag issues if any
+                        onPointerDown={(e) => e.stopPropagation()} 
                         onChange={(e) => {
                             const newVal = e.target.value;
                             if (newVal) updateActiveFlow({ targetApp: newVal });
                         }} 
                         className={`text-xs p-1.5 rounded border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'} w-full max-w-[200px] focus:outline-none focus:border-blue-500 transition-colors`}
                     >
-                        {/* 1. Explicit Fallback for "Saved" value that might not exist in current list */}
                         {availableApps.length > 0 && activeFlow.targetApp && !availableApps.find(a => (a.specifier || a.id) === activeFlow.targetApp) && (
                             <option key="saved-val" value={activeFlow.targetApp}>{activeFlow.targetApp} (Saved)</option>
                         )}
-                        
-                        {/* 2. Available Apps */}
                         {availableApps.map(app => (
                             <option key={app.specifier || app.id} value={app.specifier || app.id}>
                                 {app.name}
                             </option>
                         ))}
-
-                        {/* 3. Empty State Fallbacks */}
                         {availableApps.length === 0 && (
                             <>
                                 <option value="photoshop">Photoshop</option>

@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { AutomationFlow, AppSettings } from "../types";
+import { AutomationFlow, AIProvider, AppSettings } from "../types";
 
 const SYSTEM_INSTRUCTION = `
 You are an expert Senior Automation Architect for the "TriPanel Automator" app.
@@ -39,7 +39,7 @@ export const generateAutomationFlow = async (
   const userPrompt = currentFlow 
     ? `Update the current flow based on this request: "${prompt}". 
        Current Node Code: ${currentFlow.nodeCode.substring(0, 500)}...
-       Current ExtendScript Code: ${currentFlow.adobeCode.substring(0, 500)}...`
+       Current ExtendScript Code: ${currentFlow.appCode.substring(0, 500)}...`
     : `Create a new automation flow for: "${prompt}"`;
 
   if (aiProvider === 'gemini') {
@@ -52,10 +52,10 @@ export const generateAutomationFlow = async (
         name: { type: Type.STRING },
         uiSchema: { type: Type.STRING },
         nodeCode: { type: Type.STRING },
-        adobeCode: { type: Type.STRING },
+        appCode: { type: Type.STRING },
         simulatedLogs: { type: Type.ARRAY, items: { type: Type.STRING } }
       },
-      required: ["name", "uiSchema", "nodeCode", "adobeCode", "simulatedLogs"]
+      required: ["name", "uiSchema", "nodeCode", "appCode", "simulatedLogs"]
     };
 
     const response = await ai.models.generateContent({

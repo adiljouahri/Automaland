@@ -4,14 +4,15 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const fs = require('fs-extra');
 const path = require('path');
-const vm = require('vm'); // Use native Node.js VM instead of vm2
+const vm = require('vm'); 
 const chokidar = require('chokidar');
 const axios = require('axios');
 const archiver = require('archiver');
 const ExtendScriptFacade = require('./core/ExtendScriptFacade');
 
 const app = express();
-const PORT = 3031;
+// Default start port, will increment if busy
+let PORT = 3001; 
 
 // --- Log Streaming Setup (SSE) ---
 const logClients = [];
@@ -19,8 +20,8 @@ const logClients = [];
 function broadcastLog(type, message) {
     const payload = JSON.stringify({
         timestamp: new Date().toLocaleTimeString(),
-        source: 'NODE',
-        type: type, // 'info' or 'error'
+        source: type === 'HOST' ? 'HOST' : 'NODE',
+        type: type === 'HOST' ? 'info' : type, // 'info' or 'error'
         message: message
     });
     
@@ -29,18 +30,16 @@ function broadcastLog(type, message) {
     });
 }
 
-// Monkey-patch console.log and console.error to stream to frontend
 const originalLog = console.log;
 const originalError = console.error;
 
 console.log = (...args) => {
-    // Convert args to string
     const msg = args.map(arg => 
         typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
     ).join(' ');
     
-    originalLog.apply(console, args); // Print to actual terminal
-    broadcastLog('info', msg);        // Stream to UI
+    originalLog.apply(console, args); 
+    broadcastLog('info', msg);        
 };
 
 console.error = (...args) => {
@@ -54,36 +53,217 @@ console.error = (...args) => {
 
 // --- Initialization ---
 const GLOBAL_STATE = {};
-// Point to the 'lib' folder which is a sibling of this script (in both dev and prod/dist structure)
 const libPath = path.join(__dirname, 'lib');
-const adobeBridge = new ExtendScriptFacade(libPath);
+const hostBridge = new ExtendScriptFacade(libPath);
+
+// --- Bridge Message Listener for Logging ---
+hostBridge.on('message', (event) => {
+    // Capture $.writeln output from ExtendScript
+    if (event.message && event.message.body) {
+        let msg = event.message.body;
+        // Basic cleanup if it's wrapped in XML CDATA
+        if (msg.includes("<![CDATA[")) {
+            const match = msg.match(/<!\[CDATA\[(.*?)\]\]>/s);
+            if (match) msg = match[1];
+        }
+        broadcastLog('HOST', msg);
+    }
+});
 
 let bridgeReady = false;
 let installedApps = [];
 
+// --- Setup User Standard Library ---
+const USER_DATA_DIR = path.join(require('os').homedir(), '.tripanel');
+const USER_LIB_DIR = path.join(USER_DATA_DIR, 'lib');
+const SOURCE_JSX_DIR = path.join(__dirname, 'jsx');
+
+// Ensure directories exist
+fs.ensureDirSync(USER_LIB_DIR);
+
+// Define paths for the libraries
+const LIB_JSON = path.join(USER_LIB_DIR, 'json.jsx');
+const LIB_UNDERSCORE = path.join(USER_LIB_DIR, 'underscore.jsx');
+const LIB_LOGGER = path.join(USER_LIB_DIR, 'logger.jsx');
+const LIB_CORE = path.join(USER_LIB_DIR, 'core.jsx');
+const LIB_HANDLER = path.join(USER_LIB_DIR, 'handler.jsx');
+
+// --- Sync JSX Libs ---
+const libsToSync = [
+    { name: 'json.jsx', default: '// JSON Polyfill Placeholder\nif(typeof JSON!=="object"){JSON={};}' },
+    { name: 'underscore.jsx', default: '// Underscore Placeholder\nvar _ = {};' },
+    { 
+        name: 'logger.jsx', 
+        default: `
+function logger(name_user) {
+  var folder_log = Folder.myDocuments.fsName.replace(/\\\\/g, "/") + "/" + name_user;
+  if (!Folder(folder_log).exists) {
+    Folder(folder_log).create();
+  }
+
+  this.log_path = File(folder_log + "/log.log");
+  if (this.log_path.exists) this.log_path.remove();
+  this.log("log Extendscript inited");
+}
+logger.prototype.log = function (msg, event) {
+  try {
+    var today = new Date();
+    var date =
+      today.getFullYear() +
+      "-" +
+      (today.getMonth() + 1) +
+      "-" +
+      today.getDate();
+    var time =
+      today.getHours() + ":" + today.getMinutes() + ":" + today.getSeconds();
+    var dateTime = date + " " + time;
+
+    var f = this.log_path;
+    f.encoding = "UTF-8";
+    f.open("a");
+    var logLine = "ExtendScript: " + dateTime + ":  " + (event ? event : " INFO ") + " ====> " + msg;
+    f.writeln(logLine);
+    f.close();
+    $.writeln(logLine);
+  } catch (e) {}
+};
+var LOGGER = new logger("triPaneltApp");
+` 
+    },
+    { 
+        name: 'handler.jsx', 
+        default: `
+function requestHandler() {}
+requestHandler.prototype = {
+  parse: function (req) {
+    var res=req;
+    if (typeof req == "string") {
+      try{
+        res=JSON.parse(unescape (decodeURIComponent (req)));
+      }catch(err){
+        try{
+            res=eval(req)
+        }catch(err){}
+      }
+    }else {
+        return req
+    }
+    return res
+  },
+  toString: function (res) {
+    return JSON.stringify(res);
+  },
+  args: {
+    get: function (obj, key) {
+      var obj_key = obj[key];
+      if (obj_key) return obj_key;
+      else {
+        return {};
+      } 
+    },
+    push: function () {},
+  },
+  error: {
+    find: function () {},
+    push: function () {},
+  },
+  verify: function(obj) {
+      return (typeof obj !== 'undefined' && obj !== null) ? obj : {};
+  }
+};
+var RH = new requestHandler();
+` 
+    }
+];
+
+libsToSync.forEach(lib => {
+    const destPath = path.join(USER_LIB_DIR, lib.name);
+    const srcPath = path.join(SOURCE_JSX_DIR, lib.name);
+    
+    let content = lib.default;
+    
+    if (fs.existsSync(srcPath)) {
+        try {
+            content = fs.readFileSync(srcPath, 'utf8');
+            if (content.charCodeAt(0) === 0xFEFF) {
+                content = content.slice(1);
+            }
+            console.log(`[Sidecar] Loaded ${lib.name} from source.`);
+        } catch (e) {
+            console.warn(`[Sidecar] Failed to read source lib ${lib.name}: ${e.message}`);
+        }
+    } else {
+        console.log(`[Sidecar] Source lib ${lib.name} not found, using default.`);
+    }
+    
+    try {
+        fs.writeFileSync(destPath, content, 'utf8');
+    } catch (e) {
+        console.error(`[Sidecar] Failed to write user lib ${lib.name}: ${e.message}`);
+    }
+});
+
+const CORE_CONTENT = `
+// TriPanel Core Wrapper
+function __tripanel_wrap__(userFunc) {
+    try {
+        LOGGER.log("Starting Execution...");
+        
+        try {
+            var funcStr = userFunc.toString();
+            var logCode = funcStr.length > 250 ? funcStr.substring(0, 250) + "..." : funcStr;
+            LOGGER.log("Function Body: " + logCode);
+        } catch(e) {}
+
+        var result = userFunc();
+        if (typeof result === 'undefined') {
+            result = null;
+        } else if (result instanceof File || result instanceof Folder) {
+            result = result.fsName;
+        }
+        
+        LOGGER.log("Execution Success");
+        
+        return JSON.stringify({
+            success: true,
+            data: result
+        });
+    } catch (e) {
+        var errInfo = e.message + " (Line " + e.line + ")";
+        LOGGER.log("Execution Error: " + errInfo, "ERROR");
+        
+        return JSON.stringify({
+            success: false,
+            data: errInfo
+        });
+    }
+}
+`;
+fs.writeFileSync(LIB_CORE, CORE_CONTENT, 'utf8');
+
+// Initialize Bridge
 (async () => {
     try {
-        console.log("[Sidecar] Initializing Adobe Bridge...");
-        // Log the detected lib path for debugging
+        console.log("[Sidecar] Initializing Host Bridge...");
         console.log(`[Sidecar] Lib Path: ${libPath}`);
         
-        const success = await adobeBridge.initialize("tripanel-sidecar");
+        const success = await hostBridge.initialize("tripanel-sidecar");
         if (success === true) {
             bridgeReady = true;
-            installedApps = adobeBridge.getInstalledApps();
-            console.log("[Sidecar] Adobe Bridge Ready.");
+            installedApps = hostBridge.getInstalledApps();
+            console.log("[Sidecar] Host Bridge Ready.");
         } else {
-            console.warn("[Sidecar] Adobe Bridge did not initialize (Simulation Mode).");
+            console.warn("[Sidecar] Host Bridge did not initialize (Simulation Mode).");
             bridgeReady = false;
         }
     } catch (e) {
-        console.warn("[Sidecar] Adobe Bridge failed to initialize (Simulation Mode).", e.message);
+        console.warn("[Sidecar] Host Bridge failed to initialize (Simulation Mode).", e.message);
         bridgeReady = false;
     }
 })();
 
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '100mb' }));
 
 const utils = {
     downloadFile: async (url, dest) => {
@@ -107,7 +287,9 @@ const utils = {
 };
 
 // --- Core Execution Logic ---
-async function runNodeCode({ code, triggerData, envVars, entryPoint, targetApp }) {
+async function runNodeCode({ code, triggerData, envVars, entryPoint, targetApp, timeout = 10000, appCode }) {
+    console.log(`[Execute] Running Node Code. AppCode Length: ${appCode ? appCode.length : '0 (None)'}`);
+
     const $ = {
         run_jsx: async (jsxCode, specificApp) => {
             let appToUse = specificApp || targetApp;
@@ -116,167 +298,314 @@ async function runNodeCode({ code, triggerData, envVars, entryPoint, targetApp }
                 if (match) appToUse = match.specifier;
             }
             
-            // Critical check: if bridge is not ready, return simulation result immediately
+            const formatPath = (p) => process.platform === 'win32' ? p.replace(/\\/g, '\\\\') : p;
+
+            // Custom escape function for injecting data INTO ExtendScript
+            const escape = (val) => {
+                if (typeof (val) != "string") return val;
+                return val
+                    .replace(/[\\]/g, '\\\\')
+                    .replace(/[\/]/g, '\\/')
+                    .replace(/[\b]/g, '\\b')
+                    .replace(/[\f]/g, '\\f')
+                    .replace(/[\n]/g, '\\n')
+                    .replace(/[\r]/g, '\\r')
+                    .replace(/[\t]/g, '\\t')
+                    .replace(/[\"]/g, '\\"')
+                    .replace(/'/g, "####");
+            };
+
+            const encodeJSX = (obj) => {
+                // DEFAULT TO EMPTY OBJECT IF UNDEFINED/NULL
+                if (!obj) return '%7B%7D'; // Encoded "{}"
+                try {
+                    // 1. Stringify to JSON
+                    // 2. Escape using custom logic for the string literal
+                    // 3. URI Encode to ensure transport safety through Bridge/OS
+                    const stringified = JSON.stringify(obj);
+                    return encodeURIComponent(escape(stringified));
+                } catch(e) { return '%7B%7D'; }
+            };
+
+            // SAFE ENCODING
+            const encodedState = encodeJSX(GLOBAL_STATE);
+            const encodedTrigger = encodeJSX(triggerData);
+
+            // Injected global variables 'state' and 'triggerData' using RH.parse
+            // We verify they are objects after parsing to be safe.
+            const finalJsx = `
+#include "${formatPath(LIB_JSON)}"
+#include "${formatPath(LIB_UNDERSCORE)}"
+#include "${formatPath(LIB_LOGGER)}"
+#include "${formatPath(LIB_HANDLER)}"
+#include "${formatPath(LIB_CORE)}"
+
+// Inject State via RH.parse (which handles unescape/decode)
+var rawState = RH.parse('${encodedState}');
+var rawTrigger = RH.parse('${encodedTrigger}');
+
+// Fallback to empty object if something went wrong
+var state = (rawState === null || typeof rawState === 'undefined') ? {} : rawState;
+var triggerData = (rawTrigger === null || typeof rawTrigger === 'undefined') ? {} : rawTrigger;
+
+// --- HOST APP LIBRARY (Panel 2) ---
+${appCode || '// No Host App Code provided'}
+// ----------------------------------
+
+__tripanel_wrap__(function() {
+    ${jsxCode}
+});
+            `;
+
             if (!bridgeReady) {
                 console.log(`[Sidecar] Running JSX in Simulation Mode for ${appToUse}.`);
                 return `Simulation Result from ${appToUse}: Success`;
             }
 
             try {
-                return await adobeBridge.evaluate(appToUse, jsxCode);
+                const resultRaw = await hostBridge.evaluate(appToUse, finalJsx, "main", timeout, true);
+                
+                // When receiving data BACK from ExtendScript, we expect valid JSON 
+                // because __tripanel_wrap__ uses JSON.stringify.
+                let jsonResult;
+                try {
+                    jsonResult = JSON.parse(resultRaw);
+                } catch (parseErr) {
+                    throw new Error(`Invalid JSON returned from app: ${resultRaw}`);
+                }
+
+                if (jsonResult.success) {
+                    return jsonResult.data;
+                } else {
+                    throw new Error(`Script Error: ${jsonResult.data}`);
+                }
             } catch (e) {
-                throw new Error(`Adobe Execution Failed: ${e.message}`);
+                throw new Error(`Bridge Error: ${e.message}`);
             }
         },
         sleep: (ms) => new Promise(r => setTimeout(r, ms)),
         state: GLOBAL_STATE
     };
 
-    // Prepare the sandbox environment
     const sandbox = {
-        // Standard Node.js globals we want to expose
-        console: console, // This now uses our patched version
+        console: console, 
         require: require,
-        process: {
-            ...process,
-            env: { ...process.env, ...envVars }
-        },
+        process: { ...process, env: { ...process.env, ...envVars } },
         Buffer: Buffer,
-        setTimeout,
-        clearTimeout,
-        setInterval,
-        clearInterval,
-        
-        // App specific injections
+        setTimeout, clearTimeout, setInterval, clearInterval,
         state: GLOBAL_STATE,
-        triggerData,
+        triggerData: triggerData || {}, // Node side default
         utils,
         $: $,
-        
-        // CommonJS Module emulation
         exports: {},
         module: { exports: {} }
     };
     
-    // Link module.exports to exports
     sandbox.module.exports = sandbox.exports;
 
     try {
-        // Create context
         const context = vm.createContext(sandbox);
-        
-        // Run the code
         vm.runInContext(code, context);
-        
-        // Retrieve the exports
         const exportedModule = sandbox.module.exports;
 
-        // Execute the requested entry point
         if (exportedModule && typeof exportedModule[entryPoint] === 'function') {
             return await exportedModule[entryPoint](triggerData);
         } else if (typeof exportedModule === 'function' && entryPoint === 'run') {
-            // Handle case where user might do: module.exports = async () => { ... }
             return await exportedModule(triggerData);
         } else {
-            // Check if they put it on exports directly (exports.run = ...) which is covered by module.exports alias above, 
-            // but let's be safe if they broke the link.
-            if (sandbox.exports && typeof sandbox.exports[entryPoint] === 'function') {
+             if (sandbox.exports && typeof sandbox.exports[entryPoint] === 'function') {
                 return await sandbox.exports[entryPoint](triggerData);
             }
-            throw new Error(`Entry point '${entryPoint}' not found. Ensure you are exporting it: exports.${entryPoint} = ...`);
+            throw new Error(`Entry point '${entryPoint}' not found.`);
         }
     } catch (e) {
         throw new Error(`Script Execution Error: ${e.message}`);
     }
 }
 
-// --- Routes ---
+// --- Watcher Management ---
+const activeWatchers = {}; 
 
-// SSE Endpoint for Logs
 app.get('/api/logs', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
-
     logClients.push(res);
-
-    // Initial connection message
-    res.write(`data: ${JSON.stringify({
-        timestamp: new Date().toLocaleTimeString(),
-        source: 'SYSTEM',
-        type: 'info',
-        message: 'Connected to Log Stream'
-    })}\n\n`);
-
+    res.write(`data: ${JSON.stringify({ timestamp: new Date().toLocaleTimeString(), source: 'SYSTEM', type: 'info', message: 'Connected to Log Stream' })}\n\n`);
     req.on('close', () => {
         const index = logClients.indexOf(res);
-        if (index !== -1) {
-            logClients.splice(index, 1);
-        }
+        if (index !== -1) logClients.splice(index, 1);
     });
 });
 
 app.get('/api/adobe/apps', async (req, res) => {
     if (!bridgeReady) {
-        // Return a list of simulated apps so the UI dropdown is functional during development/simulation
         return res.json([
             { id: 'photoshop', name: 'Photoshop (Simulated)', specifier: 'photoshop' },
             { id: 'illustrator', name: 'Illustrator (Simulated)', specifier: 'illustrator' },
             { id: 'indesign', name: 'InDesign (Simulated)', specifier: 'indesign' }
         ]);
     }
-    res.json(adobeBridge.getInstalledApps());
+    res.json(hostBridge.getInstalledApps());
 });
 
 app.post('/api/execute/node', async (req, res) => {
     try {
-        const result = await runNodeCode(req.body);
+        const { code, triggerData, envVars, entryPoint, targetApp, timeout, appCode } = req.body;
+        const execTimeout = timeout ? parseInt(timeout) * 1000 : 10000;
+        
+        const result = await runNodeCode({
+            code, 
+            triggerData: triggerData || {}, // Safety default
+            envVars, 
+            entryPoint, 
+            targetApp, 
+            timeout: execTimeout,
+            appCode: appCode || ''
+        });
         res.json({ success: true, result, state: GLOBAL_STATE });
     } catch (error) {
-        console.error(error.message); // This will now stream to UI
+        console.error(error.message);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// --- Watchers ---
-const activeWatchers = {};
-
 app.post('/api/watchers/sync', (req, res) => {
     const { configs, envVars } = req.body; 
-    
-    // Clear old watchers not in the list
+
+    const incomingIds = configs.map(c => c.id);
+
+    // 1. Remove watchers (both File and Schedule)
     Object.keys(activeWatchers).forEach(id => {
-        if (!configs.some(c => c.id === id)) {
-            activeWatchers[id].close();
+        if (!incomingIds.includes(id)) {
+            console.log(`[Watcher] Stopping watcher ${id}`);
+            const w = activeWatchers[id];
+            // Close Chokidar watcher
+            if (w.watcher && typeof w.watcher.close === 'function') w.watcher.close();
+            // Clear Interval timer
+            if (w.timer) clearInterval(w.timer);
+            
             delete activeWatchers[id];
         }
     });
 
-    // Add/Update watchers
+    // 2. Add or Update watchers
     configs.forEach(config => {
-        if (activeWatchers[config.id]) activeWatchers[config.id].close();
-        
-        const watcher = chokidar.watch(config.target, { ignoreInitial: true });
-        watcher.on('add', async (filePath) => {
-            console.log(`[Watcher Trigger] ${config.id} -> File: ${filePath}`);
-            try {
-                await runNodeCode({
-                    ...config.flowContext,
-                    triggerData: { filePath, event: 'ADD' },
-                    envVars,
-                    entryPoint: 'run'
-                });
-            } catch (e) {
-                console.error(`[Watcher Error] ${config.id}:`, e.message);
+        const executeFlow = (eventType, detail) => {
+            const currentContext = activeWatchers[config.id]?.flowContext;
+            
+            if (!currentContext) {
+                console.error(`[Watcher] Context missing for ${config.id}`);
+                return;
             }
-        });
-        activeWatchers[config.id] = watcher;
+
+            console.log(`[Watcher] Trigger (${eventType}): ${detail}`);
+            
+            runNodeCode({
+                code: currentContext.code,
+                triggerData: {
+                    eventType: eventType,
+                    detail: detail,
+                    timestamp: Date.now()
+                },
+                envVars: envVars || {},
+                entryPoint: 'run',
+                targetApp: currentContext.targetApp,
+                appCode: currentContext.appCode
+            }).catch(err => console.error(`[Watcher] Execution Error: ${err.message}`));
+        };
+
+        const existing = activeWatchers[config.id];
+        
+        // If config exists, check if we need to restart it
+        if (existing) {
+            existing.flowContext = config.flowContext;
+            
+            const targetChanged = existing.target !== config.target;
+            const intervalChanged = existing.interval !== config.interval;
+            const typeChanged = existing.type !== config.type;
+
+            // If key parameters haven't changed, we don't need to restart
+            if (!targetChanged && !intervalChanged && !typeChanged) {
+                return;
+            }
+            
+            console.log(`[Watcher] Config changed for ${config.id}, restarting...`);
+            if (existing.watcher && typeof existing.watcher.close === 'function') existing.watcher.close();
+            if (existing.timer) clearInterval(existing.timer);
+            delete activeWatchers[config.id]; 
+        }
+
+        console.log(`[Watcher] Starting ${config.type} on: ${config.target}`);
+        
+        try {
+            if (config.type === 'SCHEDULE') {
+                // Config.interval is expected to be in Seconds
+                const intervalSeconds = config.interval && config.interval > 0 ? config.interval : 60; 
+                const intervalMs = intervalSeconds * 1000;
+                
+                // Start Interval
+                const timer = setInterval(() => {
+                    executeFlow('schedule', config.target || 'Scheduled Task');
+                }, intervalMs);
+
+                activeWatchers[config.id] = {
+                    type: 'SCHEDULE',
+                    timer,
+                    interval: config.interval,
+                    target: config.target,
+                    flowContext: config.flowContext
+                };
+            } else {
+                // Default to FOLDER
+                const watcher = chokidar.watch(config.target, { persistent: true, ignoreInitial: true, depth: 0 });
+                watcher.on('add', (fp) => executeFlow('add', fp));
+                watcher.on('change', (fp) => executeFlow('change', fp));
+
+                activeWatchers[config.id] = {
+                    type: 'FOLDER',
+                    watcher,
+                    target: config.target,
+                    flowContext: config.flowContext
+                };
+            }
+        } catch (e) {
+            console.error(`[Watcher] Failed to start watcher for ${config.target}: ${e.message}`);
+        }
     });
 
     res.json({ success: true, activeCount: Object.keys(activeWatchers).length });
 });
 
-app.listen(PORT, () => {
-    console.log(`Sidecar running on port ${PORT}`);
-});
+// --- Dynamic Port Startup ---
+function startServer(retryPort) {
+    const server = app.listen(retryPort, () => {
+        console.log(`Sidecar running on port ${retryPort}`);
+        PORT = retryPort; 
+        
+        try {
+            const configPath = path.join(USER_DATA_DIR, 'server.json');
+            fs.writeJsonSync(configPath, { 
+                port: retryPort, 
+                url: `http://localhost:${retryPort}`,
+                updated: Date.now()
+            });
+            console.log(`[Config] Written to ${configPath}`);
+        } catch (e) {
+            console.error("[Config] Failed to write server.json", e);
+        }
+    });
+
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.warn(`Port ${retryPort} in use, trying ${retryPort + 1}...`);
+            startServer(retryPort + 1);
+        } else {
+            console.error("Server start error:", err);
+        }
+    });
+}
+
+// Start with default 3001
+startServer(3001);

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AppSettings, WatcherConfig, EnvVariable, NpmPackage, AIProvider, AutomationFlow } from '../types';
-import { X, Plus, Trash2, Folder, Lock, Eye, Server, Cpu } from 'lucide-react';
+import { X, Plus, Trash2, Folder, Server, Cpu, Lock, Eye, Clock, Calendar } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -175,34 +175,99 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {activeTab === 'watchers' && (
               <div className="space-y-4">
                 <div className="flex gap-2">
-                  <button onClick={() => setWatchers([...watchers, {id: Date.now().toString(), type:'FOLDER', target: '/path/to/watch', active:true, flowId: availableFlows[0]?.id || ''}])} className={`flex-1 p-3 border border-dashed rounded text-sm transition-colors ${isDark ? 'border-slate-700 hover:border-blue-500 text-slate-400' : 'border-slate-300 hover:border-blue-400 text-slate-600'}`}>
-                    + New Folder Watcher
+                  <button onClick={() => setWatchers([...watchers, {id: Date.now().toString(), type:'FOLDER', target: '/path/to/watch', active:true, flowId: availableFlows[0]?.id || ''}])} className={`flex-1 p-3 border border-dashed rounded text-sm transition-colors flex items-center justify-center gap-2 ${isDark ? 'border-slate-700 hover:border-blue-500 text-slate-400' : 'border-slate-300 hover:border-blue-400 text-slate-600'}`}>
+                    <Plus className="w-4 h-4"/> New Trigger
                   </button>
                 </div>
                 <div className="space-y-3">
                   {watchers.map(w => (
-                    <div key={w.id} className={`p-4 border rounded shadow-sm ${isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
-                      <div className="flex justify-between items-start mb-3">
-                        <div className="flex items-center gap-2">
-                           <Folder className="w-4 h-4 text-blue-500" />
-                           <input 
-                            value={w.target} 
-                            onChange={e => setWatchers(watchers.map(x => x.id === w.id ? {...x, target: e.target.value} : x))}
-                            className={`bg-transparent border-none p-0 text-sm font-medium focus:ring-0 ${inputText}`} 
-                           />
-                        </div>
-                        <button onClick={() => setWatchers(watchers.filter(x => x.id !== w.id))} className="text-red-400 hover:text-red-500 p-1"><Trash2 size={16} /></button>
+                    <div key={w.id} className={`p-4 border rounded shadow-sm flex flex-col gap-3 ${isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
+                      <div className="flex items-center gap-4">
+                         {/* TYPE SELECTOR */}
+                         <div className="w-32 shrink-0">
+                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Type</label>
+                            <select 
+                                value={w.type} 
+                                onChange={e => setWatchers(watchers.map(x => x.id === w.id ? {...x, type: e.target.value as any, target: e.target.value === 'FOLDER' ? '/path/to/watch' : 'Scheduled Task'} : x))} 
+                                className={`w-full ${inputBg} border ${inputBorder} rounded px-2 py-1 text-xs ${inputText}`}
+                            >
+                                <option value="FOLDER">Folder</option>
+                                <option value="SCHEDULE">Schedule</option>
+                            </select>
+                         </div>
+
+                         {/* CONTENT BASED ON TYPE */}
+                         <div className="flex-1">
+                             {w.type === 'FOLDER' ? (
+                                <>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Folder Path</label>
+                                    <div className="flex items-center gap-2">
+                                        <Folder className="w-4 h-4 text-blue-500" />
+                                        <input 
+                                        value={w.target} 
+                                        onChange={e => setWatchers(watchers.map(x => x.id === w.id ? {...x, target: e.target.value} : x))}
+                                        className={`bg-transparent border-b border-transparent hover:border-slate-500 focus:border-blue-500 text-sm font-medium focus:outline-none w-full ${inputText}`} 
+                                        placeholder="/path/to/watch"
+                                        />
+                                    </div>
+                                </>
+                             ) : (
+                                <div className="flex gap-4">
+                                    <div className="flex-1">
+                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Description</label>
+                                        <div className="flex items-center gap-2">
+                                            <Calendar className="w-4 h-4 text-purple-500" />
+                                            <input 
+                                            value={w.target} 
+                                            onChange={e => setWatchers(watchers.map(x => x.id === w.id ? {...x, target: e.target.value} : x))}
+                                            className={`bg-transparent border-b border-transparent hover:border-slate-500 focus:border-blue-500 text-sm font-medium focus:outline-none w-full ${inputText}`} 
+                                            placeholder="Task Name"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="w-32">
+                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Interval (Sec)</label>
+                                        <div className="flex items-center gap-2">
+                                            <Clock className="w-4 h-4 text-orange-500" />
+                                            <input 
+                                            type="number"
+                                            min="10"
+                                            value={w.interval || 60} 
+                                            onChange={e => setWatchers(watchers.map(x => x.id === w.id ? {...x, interval: parseInt(e.target.value) || 60} : x))}
+                                            className={`bg-transparent border-b border-transparent hover:border-slate-500 focus:border-blue-500 text-sm font-medium focus:outline-none w-full ${inputText}`} 
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                             )}
+                         </div>
                       </div>
-                      <div>
-                        <label className={`block text-[10px] uppercase font-bold tracking-wider mb-1.5 ${labelText}`}>Trigger Automation</label>
-                        <select 
-                          value={w.flowId}
-                          onChange={e => setWatchers(watchers.map(x => x.id === w.id ? {...x, flowId: e.target.value} : x))}
-                          className={`w-full ${inputBg} border ${inputBorder} rounded px-2 py-1.5 text-xs ${inputText}`}
-                        >
-                          {availableFlows.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                          {availableFlows.length === 0 && <option value="" disabled>No flows available</option>}
-                        </select>
+
+                      <div className="flex items-center gap-4 border-t pt-3 border-slate-800/50">
+                          <div className="flex-1">
+                             <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Action Flow</label>
+                             <select 
+                              value={w.flowId}
+                              onChange={e => setWatchers(watchers.map(x => x.id === w.id ? {...x, flowId: e.target.value} : x))}
+                              className={`w-full ${inputBg} border ${inputBorder} rounded px-2 py-1.5 text-xs ${inputText}`}
+                            >
+                              {availableFlows.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                              {availableFlows.length === 0 && <option value="" disabled>No flows available</option>}
+                            </select>
+                          </div>
+
+                          <div className="flex items-center gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <span className={`text-[10px] font-bold uppercase ${w.active ? 'text-green-500' : 'text-slate-500'}`}>{w.active ? 'Active' : 'Paused'}</span>
+                                <input 
+                                    type="checkbox" 
+                                    checked={w.active} 
+                                    onChange={e => setWatchers(watchers.map(x => x.id === w.id ? {...x, active: e.target.checked} : x))}
+                                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 bg-slate-800 border-slate-600"
+                                />
+                            </label>
+                            <button onClick={() => setWatchers(watchers.filter(x => x.id !== w.id))} className="text-slate-500 hover:text-red-400 p-2 rounded hover:bg-slate-800"><Trash2 size={16} /></button>
+                          </div>
                       </div>
                     </div>
                   ))}
