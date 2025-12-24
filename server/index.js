@@ -14,17 +14,39 @@ const app = express();
 // Default start port, will increment if busy
 let PORT = 3001; 
 
+// --- Setup Logging paths ---
+const USER_DATA_DIR = path.join(require('os').homedir(), '.tripanel');
+const LOGS_DIR = path.join(USER_DATA_DIR, 'logs');
+fs.ensureDirSync(LOGS_DIR);
+const SERVER_LOG_PATH = path.join(LOGS_DIR, 'server.log');
+
+// Log Rotation / Management can be added here, for now simple append
+function writeToDisk(type, ...args) {
+    try {
+        const msg = args.map(arg => 
+            typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+        ).join(' ');
+        
+        const timestamp = new Date().toISOString();
+        const logLine = `[${timestamp}] [${type}] ${msg}\n`;
+        
+        fs.appendFileSync(SERVER_LOG_PATH, logLine, 'utf8');
+    } catch (e) {
+        // Fallback to std err if disk write fails
+        process.stdout.write("Logging failed: " + e.message + "\n");
+    }
+}
+
 // --- Log Streaming Setup (SSE) ---
 const logClients = [];
 
 function broadcastLog(type, message) {
     const payload = JSON.stringify({
         timestamp: new Date().toLocaleTimeString(),
-        source: type === 'HOST' ? 'HOST' : 'NODE',
-        type: type === 'HOST' ? 'info' : type, // 'info' or 'error'
+        source: type === 'HOST' ? 'HOST' : (type === 'UI_SYNC' ? 'UI_SYNC' : 'NODE'),
+        type: type === 'HOST' ? 'info' : (type === 'ERROR' ? 'error' : 'info'), 
         message: message
     });
-    
     logClients.forEach(client => {
         client.write(`data: ${payload}\n\n`);
     });
@@ -34,22 +56,38 @@ const originalLog = console.log;
 const originalError = console.error;
 
 console.log = (...args) => {
+    writeToDisk('INFO', ...args);
+    // Original log goes to stdout, which Tauri captures for its own debugging/logs if running in shell
+    originalLog.apply(console, args); 
+    
+    // Broadcast for UI
     const msg = args.map(arg => 
         typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
     ).join(' ');
-    
-    originalLog.apply(console, args); 
-    broadcastLog('info', msg);        
+    broadcastLog('INFO', msg);        
 };
 
 console.error = (...args) => {
+    writeToDisk('ERROR', ...args);
+    originalError.apply(console, args);
+    
     const msg = args.map(arg => 
         typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
     ).join(' ');
-    
-    originalError.apply(console, args);
-    broadcastLog('error', msg);
+    broadcastLog('ERROR', msg);
 };
+
+// Catch unhandled rejections/exceptions to log them before crash
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION:', err);
+    writeToDisk('FATAL', err.stack || err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('UNHANDLED REJECTION:', reason);
+    writeToDisk('FATAL', 'Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 
 // --- Initialization ---
 const GLOBAL_STATE = {};
@@ -66,6 +104,11 @@ hostBridge.on('message', (event) => {
             const match = msg.match(/<!\[CDATA\[(.*?)\]\]>/s);
             if (match) msg = match[1];
         }
+        
+        // Log to disk specifically as HOST
+        writeToDisk('HOST', msg);
+        
+        // Broadcast to UI
         broadcastLog('HOST', msg);
     }
 });
@@ -74,7 +117,6 @@ let bridgeReady = false;
 let installedApps = [];
 
 // --- Setup User Standard Library ---
-const USER_DATA_DIR = path.join(require('os').homedir(), '.tripanel');
 const USER_LIB_DIR = path.join(USER_DATA_DIR, 'lib');
 const SOURCE_JSX_DIR = path.join(__dirname, 'jsx');
 
@@ -102,7 +144,8 @@ function logger(name_user) {
   }
 
   this.log_path = File(folder_log + "/log.log");
-  if (this.log_path.exists) this.log_path.remove();
+  // Optional: Clean previous log if needed, or append. Here we append.
+  // if (this.log_path.exists) this.log_path.remove();
   this.log("log Extendscript inited");
 }
 logger.prototype.log = function (msg, event) {
@@ -395,7 +438,15 @@ __tripanel_wrap__(function() {
         setTimeout, clearTimeout, setInterval, clearInterval,
         state: GLOBAL_STATE,
         triggerData: triggerData || {}, // Node side default
-        utils,
+        utils: {
+            ...utils,
+            setUI: (key, value) => {
+                const payload = {};
+                payload[key] = value;
+                console.log(payload)
+                broadcastLog('UI_SYNC', JSON.stringify(payload));
+            }
+        },
         $: $,
         exports: {},
         module: { exports: {} }
@@ -581,7 +632,7 @@ app.post('/api/watchers/sync', (req, res) => {
 // --- Dynamic Port Startup ---
 function startServer(retryPort) {
     const server = app.listen(retryPort, () => {
-        console.log(`Sidecar running on port ${retryPort}`);
+        console.log(`Sidecar running on port--> ${retryPort}`);
         PORT = retryPort; 
         
         try {

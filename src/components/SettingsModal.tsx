@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppSettings, WatcherConfig, EnvVariable, NpmPackage, AIProvider, AutomationFlow } from '../types';
-import { X, Plus, Trash2, Folder, Server, Cpu, Lock, Eye, Clock, Calendar } from 'lucide-react';
+import { X, Plus, Trash2, Folder, Server, Cpu, Lock, Eye, Clock, Calendar, FileText, RefreshCw } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -29,16 +30,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   watchers, setWatchers,
   availableFlows
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'env' | 'watchers'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'env' | 'watchers' | 'logs'>('general');
   const [newEnvKey, setNewEnvKey] = useState('');
   const [newEnvVal, setNewEnvVal] = useState('');
+  const [logPaths, setLogPaths] = useState<{serverLog: string, adobeLog: string, tauriLog: string} | null>(null);
+  const [restarting, setRestarting] = useState(false);
   
   const currentPresets = PROVIDER_MODELS[settings.aiProvider] || [];
   const isUsingCustomModel = !currentPresets.includes(settings.aiModel) && settings.aiModel !== '';
   const [showCustomModelInput, setShowCustomModelInput] = useState(isUsingCustomModel || settings.aiProvider === 'custom');
 
-  if (!isOpen) return null;
   const isDark = settings.theme === 'dark';
+
+  useEffect(() => {
+    if (isOpen) {
+        if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+            invoke('get_log_paths').then((paths: any) => setLogPaths(paths)).catch(console.error);
+        }
+    }
+  }, [isOpen]);
+
+  const handleRestartServer = async () => {
+      setRestarting(true);
+      try {
+          if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+            await invoke('restart_sidecar');
+            // Give it a moment to boot
+            setTimeout(() => {
+                setRestarting(false);
+                alert("Server Restart command sent.");
+            }, 2000);
+          } else {
+              setRestarting(false);
+          }
+      } catch (e) {
+          console.error(e);
+          setRestarting(false);
+      }
+  };
+
+  if (!isOpen) return null;
 
   const modalBg = isDark ? "bg-slate-900" : "bg-white";
   const modalBorder = isDark ? "border-slate-700" : "border-slate-200";
@@ -50,6 +81,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const inputBorder = isDark ? "border-slate-700" : "border-slate-300";
   const inputText = isDark ? "text-white" : "text-slate-900";
   const labelText = isDark ? "text-slate-400" : "text-slate-600";
+  const sectionBg = isDark ? "bg-slate-900/50" : "bg-slate-50";
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -66,6 +98,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               { id: 'ai', label: 'AI Provider', icon: <Cpu className="w-4 h-4" /> },
               { id: 'env', label: 'Environment', icon: <Lock className="w-4 h-4" /> },
               { id: 'watchers', label: 'Watchers', icon: <Eye className="w-4 h-4" /> },
+              { id: 'logs', label: 'Logs', icon: <FileText className="w-4 h-4" /> },
             ].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`w-full flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-blue-600 text-white' : `${isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-200'}`}`}>
                 {tab.icon} {tab.label}
@@ -91,7 +124,67 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <option value="light">Light Mode</option>
                    </select>
                 </div>
+                
+                <div className={`p-4 rounded border ${isDark ? 'border-yellow-900/50 bg-yellow-900/20' : 'border-yellow-200 bg-yellow-50'}`}>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h4 className={`text-sm font-bold ${isDark ? 'text-yellow-500' : 'text-yellow-700'}`}>Sidecar Control</h4>
+                            <p className="text-xs text-slate-500 mt-1">If the automation server stops responding.</p>
+                        </div>
+                        <button 
+                            onClick={handleRestartServer} 
+                            disabled={restarting}
+                            className={`flex items-center gap-2 px-4 py-2 rounded text-xs font-bold transition-all ${restarting ? 'bg-slate-700 cursor-not-allowed text-slate-400' : 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-lg'}`}
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 ${restarting ? 'animate-spin' : ''}`} />
+                            {restarting ? 'Restarting...' : 'Restart Server'}
+                        </button>
+                    </div>
+                </div>
               </div>
+            )}
+
+            {activeTab === 'logs' && (
+                <div className="space-y-6">
+                    <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Persistent logs are stored locally for debugging.
+                    </p>
+                    
+                    <div className="space-y-4">
+                        <div className={`p-4 rounded border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Server className="w-4 h-4 text-green-500" />
+                                <span className={`text-sm font-bold ${inputText}`}>Server & Telemetry Log</span>
+                            </div>
+                            <div className={`text-xs font-mono p-2 rounded break-all select-all cursor-text ${isDark ? 'bg-black/50 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                                {logPaths?.serverLog || "Unavailable"}
+                            </div>
+                             <p className="text-[10px] text-slate-500 mt-2">Contains Node.js execution logs, API errors, and telemetry.</p>
+                        </div>
+
+                        <div className={`p-4 rounded border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Cpu className="w-4 h-4 text-blue-500" />
+                                <span className={`text-sm font-bold ${inputText}`}>ExtendScript (Adobe) Log</span>
+                            </div>
+                            <div className={`text-xs font-mono p-2 rounded break-all select-all cursor-text ${isDark ? 'bg-black/50 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                                {logPaths?.adobeLog || "Unavailable"}
+                            </div>
+                             <p className="text-[10px] text-slate-500 mt-2">Contains logs generated specifically by Photoshop/Illustrator scripts.</p>
+                        </div>
+
+                        <div className={`p-4 rounded border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                            <div className="flex items-center gap-2 mb-2">
+                                <FileText className="w-4 h-4 text-purple-500" />
+                                <span className={`text-sm font-bold ${inputText}`}>Application (Tauri) Log</span>
+                            </div>
+                            <div className={`text-xs font-mono p-2 rounded break-all select-all cursor-text ${isDark ? 'bg-black/50 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                                {logPaths?.tauriLog || "Unavailable"}
+                            </div>
+                             <p className="text-[10px] text-slate-500 mt-2">Contains system level events and sidecar lifecycle logs.</p>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {activeTab === 'ai' && (

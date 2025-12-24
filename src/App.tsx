@@ -192,8 +192,19 @@ function App() {
     if (!settings.serverUrl) return;
     const eventSource = new EventSource(`${settings.serverUrl}/api/logs`);
     eventSource.onmessage = (event) => {
+      console.log('event',event)
       try {
         const data = JSON.parse(event.data);
+        
+        // Handle UI Updates from Node.js (utils.setUI)
+        if (data.source === 'UI_SYNC') {
+            try {
+                const updates = JSON.parse(data.message);
+                setFormData(prev => ({ ...prev, ...updates }));
+            } catch(e) {}
+            return; // Don't add to log console
+        }
+
         setLogs(prev => [...prev, { 
             id: Math.random().toString(36), 
             timestamp: data.timestamp, 
@@ -402,7 +413,6 @@ function App() {
     if (true) {
       const configs = activeWatchersList.map(w => {
         const flow = flows.find(f => f.id === w.flowId);
-        console.log(flow)
         return {
           id: w.id,
           target: w.target,

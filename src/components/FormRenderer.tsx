@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { JSONSchema } from '../types';
-import { FileJson, Code, Eye, AlertTriangle, PlayCircle } from 'lucide-react';
+import { FileJson, Code, Eye, AlertTriangle, PlayCircle, Type, Hash, CheckSquare, List, FileText, Key, Copy } from 'lucide-react';
 
 interface FormRendererProps {
   schemaStr: string;
@@ -24,6 +24,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   isRunning = false
 }) => {
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const isDark = theme === 'dark';
   
   const { schema, error } = useMemo(() => {
@@ -36,6 +37,58 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   const handleChange = (key: string, value: any) => {
     onChange({ ...formData, [key]: value });
+  };
+
+  const handleCopyKey = (key: string) => {
+      const codeSnippet = `utils.setUI('${key}', 'New Value');`;
+      navigator.clipboard.writeText(codeSnippet);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const injectField = (type: 'string' | 'number' | 'boolean' | 'enum' | 'file') => {
+    try {
+        let current: any;
+        try {
+            current = JSON.parse(schemaStr);
+        } catch(e) {
+            current = { type: "object", properties: {} };
+        }
+
+        if (!current.properties) current.properties = {};
+        
+        const timestamp = Date.now().toString().slice(-4);
+        let newField: any = {};
+        let keyName = "";
+
+        switch(type) {
+            case 'string':
+                keyName = `text_${timestamp}`;
+                newField = { type: "string", title: "New Text Input", default: "" };
+                break;
+            case 'number':
+                keyName = `num_${timestamp}`;
+                newField = { type: "number", title: "New Number", default: 0 };
+                break;
+            case 'boolean':
+                keyName = `check_${timestamp}`;
+                newField = { type: "boolean", title: "New Checkbox", default: false };
+                break;
+            case 'enum':
+                keyName = `select_${timestamp}`;
+                newField = { type: "string", title: "New Dropdown", enum: ["Option A", "Option B"], default: "Option A" };
+                break;
+            case 'file':
+                keyName = `file_${timestamp}`;
+                newField = { type: "string", title: "File Path", description: "Path to a file or folder", default: "./" };
+                break;
+        }
+
+        current.properties[keyName] = newField;
+        onSchemaChange(JSON.stringify(current, null, 2));
+    } catch (e) {
+        alert("Cannot inject field: Invalid JSON currently in editor.");
+    }
   };
 
   const containerBorder = isDark ? "border-slate-700" : "border-slate-200";
@@ -79,6 +132,16 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         </div>
       </div>
       
+      {/* TOOLBAR - Always Visible */}
+      <div className={`flex items-center gap-1 px-3 py-2 border-b ${headerBorder} ${isDark ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
+            <span className="text-[10px] uppercase font-bold text-slate-500 mr-2">Add:</span>
+            <button onClick={() => injectField('string')} title="Add Text Input" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><Type className="w-3.5 h-3.5" /></button>
+            <button onClick={() => injectField('number')} title="Add Number Input" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><Hash className="w-3.5 h-3.5" /></button>
+            <button onClick={() => injectField('boolean')} title="Add Checkbox" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><CheckSquare className="w-3.5 h-3.5" /></button>
+            <button onClick={() => injectField('enum')} title="Add Dropdown" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><List className="w-3.5 h-3.5" /></button>
+            <button onClick={() => injectField('file')} title="Add File Path" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><FileText className="w-3.5 h-3.5" /></button>
+      </div>
+
       <div className={`flex-1 overflow-hidden relative ${contentBg} flex flex-col`}>
         <div className="flex-1 overflow-hidden relative">
         {viewMode === 'code' ? (
@@ -105,53 +168,68 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
                 <form className="space-y-5" onSubmit={(e) => e.preventDefault()}>
                 {schema.properties && Object.entries(schema.properties).map(([key, prop]: [string, any]) => (
-                    <div key={key} className="flex flex-col gap-1.5">
-                    <label className={`text-xs font-medium uppercase tracking-wider ${labelColor}`}>
-                        {prop.title || key}
-                    </label>
-                    
-                    {prop.description && (
-                        <span className="text-xs text-slate-500 mb-1">{prop.description}</span>
-                    )}
-
-                    {prop.enum ? (
-                        <select
-                        value={formData[key] || ''}
-                        onChange={(e) => handleChange(key, e.target.value)}
-                        className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
-                        >
-                            <option value="" disabled>Select an option</option>
-                        {prop.enum.map((opt: string) => (
-                            <option key={opt} value={opt}>{opt}</option>
-                        ))}
-                        </select>
-                    ) : prop.type === 'boolean' ? (
-                        <div className="flex items-center gap-2 mt-1">
-                            <input
-                                type="checkbox"
-                                checked={formData[key] || false}
-                                onChange={(e) => handleChange(key, e.target.checked)}
-                                className={`w-4 h-4 rounded ${inputBorder} ${inputBg} text-blue-500 focus:ring-blue-500`}
-                            />
-                            <span className={`text-sm ${labelColor}`}>{prop.title || key}</span>
+                    <div key={key} className="flex flex-col gap-1.5 group relative">
+                        <div className="flex justify-between items-center">
+                            <label className={`text-xs font-medium uppercase tracking-wider flex items-center gap-2 ${labelColor}`}>
+                                {prop.title || key}
+                            </label>
+                            
+                            {/* Key/Variable Inspector */}
+                            <button 
+                                onClick={() => handleCopyKey(key)}
+                                className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-all opacity-0 group-hover:opacity-100
+                                ${copiedKey === key 
+                                    ? 'bg-green-500/10 border-green-500 text-green-500' 
+                                    : (isDark ? 'bg-slate-800 border-slate-700 text-slate-500 hover:text-blue-400' : 'bg-slate-100 border-slate-300 text-slate-500 hover:text-blue-600')}`}
+                                title={`Key: "${key}" - Click to copy Node.js setUI code`}
+                            >
+                                {copiedKey === key ? <Copy className="w-3 h-3" /> : <Key className="w-3 h-3" />}
+                                <span className="font-mono">{key}</span>
+                            </button>
                         </div>
-                    ) : prop.type === 'integer' || prop.type === 'number' ? (
-                        <input
-                        type="number"
-                        value={formData[key] || ''}
-                        onChange={(e) => handleChange(key, Number(e.target.value))}
-                        className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
-                        placeholder="0"
-                        />
-                    ) : (
-                        <input
-                        type="text"
-                        value={formData[key] || ''}
-                        onChange={(e) => handleChange(key, e.target.value)}
-                        className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
-                        placeholder={key === 'file' ? '/path/to/file.png' : 'Enter text...'}
-                        />
-                    )}
+                        
+                        {prop.description && (
+                            <span className="text-xs text-slate-500 mb-1">{prop.description}</span>
+                        )}
+
+                        {prop.enum ? (
+                            <select
+                            value={formData[key] || prop.default || ''}
+                            onChange={(e) => handleChange(key, e.target.value)}
+                            className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                            >
+                                <option value="" disabled>Select an option</option>
+                            {prop.enum.map((opt: string) => (
+                                <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                            </select>
+                        ) : prop.type === 'boolean' ? (
+                            <div className="flex items-center gap-2 mt-1">
+                                <input
+                                    type="checkbox"
+                                    checked={formData[key] || prop.default || false}
+                                    onChange={(e) => handleChange(key, e.target.checked)}
+                                    className={`w-4 h-4 rounded ${inputBorder} ${inputBg} text-blue-500 focus:ring-blue-500`}
+                                />
+                                <span className={`text-sm ${labelColor}`}>{prop.title || key}</span>
+                            </div>
+                        ) : prop.type === 'integer' || prop.type === 'number' ? (
+                            <input
+                            type="number"
+                            value={formData[key] || prop.default || ''}
+                            onChange={(e) => handleChange(key, Number(e.target.value))}
+                            className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                            placeholder="0"
+                            />
+                        ) : (
+                            <input
+                            type="text"
+                            value={formData[key] || prop.default || ''}
+                            onChange={(e) => handleChange(key, e.target.value)}
+                            className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                            placeholder={key === 'file' ? '/path/to/file.png' : 'Enter text...'}
+                            />
+                        )}
                     </div>
                 ))}
 

@@ -27,6 +27,9 @@ const fs = require('fs');
 exports.run = async (triggerData) => {
   console.log("🚀 Starting Orchestration...");
   
+  // Example: Update UI from Node (Real-time feedback)
+  utils.setUI('clientName', 'Processing Started...');
+  
   // A. Node Logic
   const msg = \`Processing for \${triggerData.clientName}\`;
   console.log(msg);
@@ -47,6 +50,9 @@ exports.run = async (triggerData) => {
   \`);
 
   console.log("✅ App Returned: " + appResult);
+  
+  // Reset UI
+  utils.setUI('clientName', 'Done!');
   
   return { success: true, appData: appResult };
 };
