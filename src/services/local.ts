@@ -1,3 +1,4 @@
+
 import { invoke } from '@tauri-apps/api/core';
 import { AutomationFlow } from '../types';
 
@@ -42,6 +43,7 @@ export class LocalStoreService {
                 ...f,
                 appCode: f.appCode || f.adobeCode || '', // Map adobeCode from Rust to appCode for Frontend
                 chatHistory: typeof f.chatHistory === 'string' ? JSON.parse(f.chatHistory) : f.chatHistory,
+                savedFormData: f.savedFormData ? JSON.parse(f.savedFormData) : {},
                 strapiId: undefined // Local flows don't use strapiId
             })).filter((f: AutomationFlow) => {
                 if (userId && f.ownerId && f.ownerId !== userId) return false;
@@ -74,7 +76,8 @@ export class LocalStoreService {
         const rustPayload = {
             ...payload,
             adobeCode: flow.appCode, // Map appCode to adobeCode for Rust persistence
-            chatHistory: JSON.stringify(flow.chatHistory)
+            chatHistory: JSON.stringify(flow.chatHistory),
+            savedFormData: JSON.stringify(flow.savedFormData || {})
         };
 
         await invoke('save_local_flow', { flow: JSON.stringify(rustPayload) });

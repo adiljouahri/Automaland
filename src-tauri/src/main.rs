@@ -25,7 +25,8 @@ struct Flow {
     chatHistory: String,
     createdAt: i64,
     isPublic: bool,
-    ownerId: Option<i64>
+    ownerId: Option<i64>,
+    savedFormData: Option<String>
 }
 
 struct SidecarState {
@@ -69,10 +70,15 @@ fn init_db(app_handle: tauri::AppHandle) -> Result<(), String> {
             chatHistory TEXT,
             createdAt INTEGER,
             isPublic INTEGER,
-            ownerId INTEGER
+            ownerId INTEGER,
+            savedFormData TEXT
         )",
         [],
     ).map_err(|e| e.to_string())?;
+
+    // Migration: Attempt to add savedFormData column if it doesn't exist (for existing users)
+    // We ignore the error if column already exists
+    let _ = db_conn.execute("ALTER TABLE flows ADD COLUMN savedFormData TEXT", []);
     
     Ok(())
 }
@@ -86,8 +92,8 @@ fn save_local_flow(app_handle: tauri::AppHandle, flow: String) -> Result<String,
     let save_conn = DbConnection::open(db_path).map_err(|e| e.to_string())?;
 
     save_conn.execute(
-        "INSERT OR REPLACE INTO flows (flowId, id, name, uiSchema, nodeCode, adobeCode, targetApp, chatHistory, createdAt, isPublic, ownerId)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT OR REPLACE INTO flows (flowId, id, name, uiSchema, nodeCode, adobeCode, targetApp, chatHistory, createdAt, isPublic, ownerId, savedFormData)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             f.flowId, 
             f.id, 
@@ -99,7 +105,8 @@ fn save_local_flow(app_handle: tauri::AppHandle, flow: String) -> Result<String,
             f.chatHistory, 
             f.createdAt, 
             if f.isPublic { 1 } else { 0 },
-            f.ownerId
+            f.ownerId,
+            f.savedFormData
         ],
     ).map_err(|e| e.to_string())?;
 
@@ -116,7 +123,9 @@ fn get_local_flows(app_handle: tauri::AppHandle) -> Result<String, String> {
     }
     
     let read_conn = DbConnection::open(db_path).map_err(|e| e.to_string())?;
-    let mut stmt = read_conn.prepare("SELECT flowId, id, name, uiSchema, nodeCode, adobeCode, targetApp, chatHistory, createdAt, isPublic, ownerId FROM flows").map_err(|e| e.to_string())?;
+    // We try to select savedFormData. If table is old and migration failed, this might error if we didn't handle migration well.
+    // But init_db guarantees migration attempt.
+    let mut stmt = read_conn.prepare("SELECT flowId, id, name, uiSchema, nodeCode, adobeCode, targetApp, chatHistory, createdAt, isPublic, ownerId, savedFormData FROM flows").map_err(|e| e.to_string())?;
     
     let flow_iter = stmt.query_map([], |row| {
         Ok(Flow {
@@ -131,6 +140,7 @@ fn get_local_flows(app_handle: tauri::AppHandle) -> Result<String, String> {
             createdAt: row.get(8)?,
             isPublic: row.get::<_, i32>(9)? == 1,
             ownerId: row.get(10)?,
+            savedFormData: row.get(11).ok()
         })
     }).map_err(|e| e.to_string())?;
 

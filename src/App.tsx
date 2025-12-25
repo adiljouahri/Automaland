@@ -98,7 +98,7 @@ function App() {
   const [watchers, setWatchers] = useState<WatcherConfig[]>(() => {
       const saved = localStorage.getItem('app_watchers');
       if (saved) {
-          try { return JSON.parse(saved); } catch(e) {}
+          try { return JSON.parse(saved); } catch(e) { console.error("Failed to parse local watchers:", e); }
       }
       return [];
   });
@@ -111,53 +111,48 @@ function App() {
   
   const [viewMode, setViewMode] = useState<'editor' | 'grid'>('editor');
   
-  const [flows, setFlows] = useState<AutomationFlow[]>([{
-    id: 'default-flow-1',
-    flowId: 'default-uuid-1',
-    name: 'Default Automation',
-    uiSchema: INITIAL_UI_SCHEMA,
-    nodeCode: INITIAL_NODE_CODE,
-    appCode: INITIAL_APP_CODE,
-    targetApp: 'photoshop',
-    simulatedLogs: [],
-    isPublic: false,
-    chatHistory: [{
-      id: 'welcome',
-      role: 'model',
-      text: 'Hello! I am your AI Architect. Try: "Watch a folder for JPGs, watermark them in Photoshop, and upload to S3."',
-      timestamp: new Date()
-    }],
-    createdAt: Date.now(),
-    history: [],
-    executionTimeout: 10
-  }]);
+  // Initial State: Try to load active flow ID from localStorage
+  const [flows, setFlows] = useState<AutomationFlow[]>([]);
+  const [activeFlowId, setActiveFlowId] = useState<string>(() => {
+      return localStorage.getItem('active_flow_id') || 'default-flow-1';
+  });
 
-  const [activeFlowId, setActiveFlowId] = useState<string>('default-flow-1');
-  
+  // Persist Active Flow ID
+  useEffect(() => {
+      if (activeFlowId) {
+          localStorage.setItem('active_flow_id', activeFlowId);
+      }
+  }, [activeFlowId]);
+
   const activeFlow = useMemo(() => {
     const found = flows.find(f => f.id === activeFlowId);
     if (found) return found;
+    // Fallback logic inside the render mainly, but here we return undefined/null if not found
+    // If we have flows but ID is wrong, default to first
     if (flows.length > 0) return flows[0];
     
-    return {
-        id: 'fallback-flow',
-        flowId: 'fallback',
-        name: 'No Flow Selected',
-        uiSchema: INITIAL_UI_SCHEMA,
-        nodeCode: INITIAL_NODE_CODE,
-        appCode: INITIAL_APP_CODE,
-        targetApp: 'photoshop',
-        simulatedLogs: [],
-        isPublic: false,
-        chatHistory: [],
-        createdAt: Date.now(),
-        history: [],
-        executionTimeout: 10
-    } as AutomationFlow;
+    // Completely empty state
+    return null; 
   }, [flows, activeFlowId]);
+  
+  // Fix: If activeFlow changes due to fallback logic above, sync the ID
+  useEffect(() => {
+      if (activeFlow && activeFlow.id !== activeFlowId) {
+          setActiveFlowId(activeFlow.id);
+      }
+  }, [activeFlow, activeFlowId]);
 
-  const isFallback = activeFlow.id === 'fallback-flow';
-  const isOwner = isFallback ? false : (activeFlow?.ownerId === user?.id || !activeFlow?.ownerId || !activeFlow.isPublic);
+  // --- SYNC FORM DATA ON FLOW SWITCH ---
+  // When switching between flows, load the saved form data into the state
+  useEffect(() => {
+      if (activeFlow) {
+          setFormData(activeFlow.savedFormData || {});
+      } else {
+          setFormData({});
+      }
+  }, [activeFlow?.id]); // Only run when the ID changes (switching flows)
+
+  const isOwner = activeFlow ? (activeFlow.ownerId === user?.id || !activeFlow.ownerId || !activeFlow.isPublic) : false;
   
   const [sidebarTab, setSidebarTab] = useState<'chat' | 'flows'>('chat');
   const [flowListFilter, setFlowListFilter] = useState<'all' | 'mine' | 'public'>('all');
@@ -192,7 +187,6 @@ function App() {
     if (!settings.serverUrl) return;
     const eventSource = new EventSource(`${settings.serverUrl}/api/logs`);
     eventSource.onmessage = (event) => {
-      console.log('event',event)
       try {
         const data = JSON.parse(event.data);
         
@@ -201,7 +195,9 @@ function App() {
             try {
                 const updates = JSON.parse(data.message);
                 setFormData(prev => ({ ...prev, ...updates }));
-            } catch(e) {}
+            } catch(e) {
+                console.error("Failed to parse UI_SYNC message:", e);
+            }
             return; // Don't add to log console
         }
 
@@ -212,7 +208,9 @@ function App() {
             message: data.message, 
             type: data.type || 'info' 
         }]);
-      } catch (e) {}
+      } catch (e) {
+          console.error("Failed to parse SSE event:", e);
+      }
     };
     eventSource.onerror = (e) => { eventSource.close(); };
     return () => { eventSource.close(); };
@@ -252,12 +250,34 @@ function App() {
                 flowMap.set(lf.flowId, lf);
             }
         });
-        prev.forEach(f => {
-             if (f.flowId && !flowMap.has(f.flowId) && !f.id.startsWith('private') && !f.id.startsWith('public')) {
-                 flowMap.set(f.flowId, f);
-             }
-        });
-        return Array.from(flowMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+        
+        // If previous state had items, try to preserve order or re-sort
+        const merged = Array.from(flowMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+        if (merged.length === 0) {
+            // Seed default if absolutely nothing exists
+            return [{
+                id: 'default-flow-1',
+                flowId: 'default-uuid-1',
+                name: 'Default Automation',
+                uiSchema: INITIAL_UI_SCHEMA,
+                nodeCode: INITIAL_NODE_CODE,
+                appCode: INITIAL_APP_CODE,
+                targetApp: 'photoshop',
+                simulatedLogs: [],
+                isPublic: false,
+                chatHistory: [{
+                id: 'welcome',
+                role: 'model',
+                text: 'Hello! I am your AI Architect. Try: "Watch a folder for JPGs, watermark them in Photoshop, and upload to S3."',
+                timestamp: new Date()
+                }],
+                createdAt: Date.now(),
+                history: [],
+                executionTimeout: 10,
+                savedFormData: {}
+            }];
+        }
+        return merged;
     });
   };
 
@@ -273,8 +293,22 @@ function App() {
 
   const handleSaveFlow = async (flowToSave?: AutomationFlow) => {
     if (isSavingRef.current) return;
-    const target = flowToSave || activeFlow;
-    if (target.id === 'fallback-flow') return;
+    
+    // IMPORTANT: Always grab the freshest version of the active flow from the state array
+    // 'activeFlow' from useMemo might be stale inside async closures depending on timing
+    // We try to use the argument first, then fall back to finding it in current 'flows'
+    const targetId = flowToSave?.id || activeFlowId;
+    const freshFlow = flows.find(f => f.id === targetId);
+
+    if (!freshFlow) return;
+
+    // Merge current state into target, specifically saving the current Form Data
+    const target = { 
+        ...freshFlow, 
+        savedFormData: formData, // Persist current UI inputs
+        ...(flowToSave || {}) 
+    };
+
     if (!target.flowId) target.flowId = crypto.randomUUID();
 
     isSavingRef.current = true;
@@ -297,10 +331,18 @@ function App() {
             };
             const updatedHistory = [newVersion, ...(target.history || [])].slice(0, 15);
             const flowWithHistory = { ...target, history: updatedHistory };
+            
+            // Save to DB
             await LocalStoreService.saveFlow(flowWithHistory);
-            updateActiveFlow({ history: updatedHistory });
+            
+            // Update React State immediately to reflect history change & saved data
+            updateActiveFlow({ 
+                history: updatedHistory,
+                savedFormData: formData 
+            });
+            
             if (strapi.isAuthenticated()) await strapi.deletePublicFlow(target.flowId);
-            addLog(`Flow "${target.name}" saved locally (Version captured).`, "SYSTEM", "success");
+            addLog(`Flow "${target.name}" saved locally.`, "SYSTEM", "success");
         }
     } catch (e: any) {
       addLog(`Failed to save: ${e.message}`, "SYSTEM", "error");
@@ -311,6 +353,7 @@ function App() {
   };
 
   const handleExportJSON = async () => {
+    if (!activeFlow) return;
     const exportData = {
         ...activeFlow,
         history: [], // Keep export light
@@ -370,7 +413,8 @@ function App() {
                         isPublic: false,
                         createdAt: Date.now(),
                         history: [],
-                        chatHistory: parsed.chatHistory || []
+                        chatHistory: parsed.chatHistory || [],
+                        savedFormData: parsed.savedFormData || {}
                     };
                     
                     setFlows(prev => [importedFlow, ...prev]);
@@ -434,7 +478,7 @@ function App() {
   }, [watchers, flows, envVars, safeServerRequest]);
 
   const handlePublish = async () => {
-    if (!isOwner || isFallback) return;
+    if (!isOwner || !activeFlow) return;
     if (!strapi.isAuthenticated()) {
         alert("Please login to publish flows.");
         return;
@@ -446,6 +490,7 @@ function App() {
   };
 
   const handleImport = async () => {
+    if (!activeFlow) return;
     const newId = `private-${crypto.randomUUID()}`;
     const newFlowId = crypto.randomUUID();
     const importedFlow: AutomationFlow = {
@@ -457,7 +502,8 @@ function App() {
         ownerId: user?.id,
         createdAt: Date.now(),
         strapiId: undefined,
-        history: [] 
+        history: [],
+        savedFormData: activeFlow.savedFormData || {}
     };
     setFlows(prev => [importedFlow, ...prev]);
     setActiveFlowId(newId);
@@ -466,6 +512,7 @@ function App() {
   };
 
   const handleDuplicateFlow = () => {
+     if (!activeFlow) return;
      const newId = `flow-copy-${Date.now()}`;
      const copy: AutomationFlow = {
          ...activeFlow,
@@ -476,7 +523,8 @@ function App() {
          name: `${activeFlow.name} (Copy)`,
          isPublic: false,
          createdAt: Date.now(),
-         history: []
+         history: [],
+         savedFormData: activeFlow.savedFormData || {}
      };
      setFlows(prev => [copy, ...prev]);
      setActiveFlowId(newId);
@@ -514,7 +562,8 @@ function App() {
         chatHistory: [],
         createdAt: Date.now(),
         history: [],
-        executionTimeout: 10
+        executionTimeout: 10,
+        savedFormData: {}
     }]);
     setActiveFlowId('default-flow-1');
   };
@@ -546,7 +595,7 @@ function App() {
   };
 
   const updateActiveFlow = (updates: Partial<AutomationFlow>) => {
-    if (isFallback) return;
+    if (!activeFlow) return;
     setFlows(prev => prev.map(f => f.id === activeFlowId ? { ...f, ...updates } : f));
   };
 
@@ -567,7 +616,8 @@ function App() {
       chatHistory: [{ id: 'init', role: 'model', text: 'New flow created. What should we build?', timestamp: new Date() }],
       createdAt: Date.now(),
       history: [],
-      executionTimeout: 10
+      executionTimeout: 10,
+      savedFormData: {}
     };
     setFlows(prev => [newFlow, ...prev]);
     setActiveFlowId(newId);
@@ -577,9 +627,13 @@ function App() {
 
   const handleDeleteFlow = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (flows.length <= 1) return;
+    
+    // Allow deleting the last flow to clear the workspace
     const flowToDelete = flows.find(f => f.id === id);
     if (!flowToDelete) return;
+    
+    if(!confirm(`Delete flow "${flowToDelete.name}"? This cannot be undone.`)) return;
+
     try {
         if (flowToDelete.isPublic) {
              if(strapi.isAuthenticated()) await strapi.deletePublicFlow(flowToDelete.flowId);
@@ -590,13 +644,21 @@ function App() {
     } catch(e: any) {
         addLog(`Failed to delete: ${e.message}`, "SYSTEM", "error");
     }
+    
     const newFlows = flows.filter(f => f.id !== id);
     setFlows(newFlows);
-    if (activeFlowId === id) setActiveFlowId(newFlows[0].id);
+    
+    if (activeFlowId === id) {
+        if (newFlows.length > 0) {
+            setActiveFlowId(newFlows[0].id);
+        } else {
+            setActiveFlowId(''); // Clear selection
+        }
+    }
   };
 
   const handleSendMessage = async () => {
-    if (isFallback) return;
+    if (!activeFlow) return;
     if (!isOwner) {
        alert("Duplicate this flow to use AI chat.");
        return;
@@ -615,10 +677,55 @@ function App() {
     } finally { setStatus(AppStatus.IDLE); }
   };
 
+  const handleInjectSnippet = (type: 'file_browser' | 'folder_browser') => {
+    if (!activeFlow) return;
+    const timestamp = Date.now().toString().slice(-4);
+    const key = type === 'file_browser' ? `filePath_${timestamp}` : `folderPath_${timestamp}`;
+    const actionName = type === 'file_browser' ? `browse_file_${timestamp}` : `browse_folder_${timestamp}`;
+
+    // 1. Update Schema
+    try {
+        const newSchema = JSON.parse(activeFlow.uiSchema);
+        if (!newSchema.properties) newSchema.properties = {};
+        newSchema.properties[key] = { 
+            type: "string", 
+            title: type === 'file_browser' ? "Select File" : "Select Folder", 
+            default: "" 
+        };
+        const newSchemaStr = JSON.stringify(newSchema, null, 2);
+
+        // 2. Update Host App Code
+        let newAppCode = activeFlow.appCode;
+        if (!newAppCode.includes("function selectfolder")) {
+            newAppCode += `\n\nfunction selectfolder() {\n  var fold = Folder.selectDialog("Select Folder");\n  if (fold) return fold.fsName.replace(/\\\\/g, "/");\n  return "Error";\n}`;
+        }
+        if (!newAppCode.includes("function selectfile")) {
+            newAppCode += `\n\nfunction selectfile() {\n  var fold = File.openDialog("Select File");\n  if (fold) return fold.fsName.replace(/\\\\/g, "/");\n  return "Error";\n}`;
+        }
+
+        // 3. Update Node Code
+        // FIX: Add 'return' to the $.run_jsx string to ensure the result is passed back from ES3
+        const jsFunction = type === 'file_browser' ? 'return selectfile()' : 'return selectfolder()';
+        const newNodeCode = activeFlow.nodeCode + `\n\n// Action: Browse ${type === 'file_browser' ? 'File' : 'Folder'}\nexports.${actionName} = async () => {\n  const result = await $.run_jsx('${jsFunction}');\n  if (result && result !== "Error") {\n    utils.setUI('${key}', result);\n  }\n};`;
+
+        updateActiveFlow({
+            uiSchema: newSchemaStr,
+            appCode: newAppCode,
+            nodeCode: newNodeCode
+        });
+        
+        addLog(`Injected ${type === 'file_browser' ? 'File' : 'Folder'} Picker Snippet`, "SYSTEM", "success");
+
+    } catch (e: any) {
+        addLog(`Snippet injection failed: ${e.message}`, "SYSTEM", "error");
+    }
+  };
+
   const handleRun = async (entryPoint: string = 'run', specificFlow?: AutomationFlow) => {
     if (status !== AppStatus.IDLE) return;
-    if (isFallback) return;
     const targetFlow = specificFlow || activeFlow;
+    if (!targetFlow) return;
+    
     setStatus(AppStatus.RUNNING);
     addLog(`Starting '${entryPoint}'...`, "SYSTEM");
     try {
@@ -643,11 +750,11 @@ function App() {
     } finally { setStatus(AppStatus.IDLE); }
   };
 
-  const detectedActions = useMemo(() => isFallback ? [] : extractActions(activeFlow.nodeCode), [activeFlow.nodeCode, isFallback]);
+  const detectedActions = useMemo(() => (!activeFlow) ? [] : extractActions(activeFlow.nodeCode), [activeFlow?.nodeCode]);
 
   useEffect(() => {
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-  }, [activeFlow.chatHistory]);
+  }, [activeFlow?.chatHistory]);
 
   const bgMain = isDark ? "bg-slate-950" : "bg-slate-50";
   const bgSidebar = isDark ? "bg-slate-900/50" : "bg-white border-r border-slate-200";
@@ -662,6 +769,7 @@ function App() {
   }), [flows, flowListFilter, user?.id]);
 
   if (!user && !strapi.isAuthenticated()) {
+    // ... (Login Screen - Same as before)
     return (
       <div className={`flex items-center justify-center min-h-screen ${bgMain} p-6`}>
         <div className={`max-w-md w-full rounded-2xl p-8 shadow-2xl border ${borderPrimary} ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
@@ -692,7 +800,8 @@ function App() {
       {/* HIDDEN FILE INPUT FOR IMPORT */}
       <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleImportJSON} />
 
-      {showHistory && (
+      {/* HISTORY MODAL */}
+      {showHistory && activeFlow && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center" onClick={() => setShowHistory(false)}>
               <div className={`w-[500px] h-[600px] rounded-xl flex flex-col overflow-hidden shadow-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`} onClick={e => e.stopPropagation()}>
                   <div className={`p-4 border-b flex items-center justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-100 bg-slate-50'}`}>
@@ -720,40 +829,94 @@ function App() {
           </div>
       )}
 
+      {/* SIDEBAR */}
       <div className={`w-80 flex flex-col ${borderPrimary} ${bgSidebar}`}>
         <div className={`flex border-b ${borderPrimary}`}>
           <button onClick={() => setSidebarTab('chat')} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${sidebarTab === 'chat' ? 'bg-slate-800/50 text-blue-400 border-b-2 border-blue-500' : textSecondary}`}><MessageSquare className="w-4 h-4" /> Chat</button>
           <button onClick={() => setSidebarTab('flows')} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${sidebarTab === 'flows' ? 'bg-slate-800/50 text-blue-400 border-b-2 border-blue-500' : textSecondary}`}><List className="w-4 h-4" /> Library</button>
         </div>
+        
         {sidebarTab === 'chat' ? (
-          <><div className="flex-1 overflow-y-auto p-4 space-y-4">{activeFlow.chatHistory.map(msg => (<div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}><div className={`p-3 rounded-lg text-sm shadow-md max-w-[95%] ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : (isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-700 border border-slate-200 shadow-sm') + ' rounded-bl-none border'}`}>{msg.text}</div></div>))} <div ref={chatEndRef} /></div>
-            <div className={`p-4 border-t ${borderPrimary} ${isDark ? 'bg-slate-900' : 'bg-white'}`}><div className="relative"><textarea className={`w-full border rounded-lg pl-3 pr-10 py-3 text-sm focus:outline-none focus:border-blue-500 resize-none h-24 ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`} placeholder={isOwner ? "Describe automation..." : "Duplicate to use AI chat..."} value={chatInput} disabled={!isOwner} onChange={e => setChatInput(e.target.value)} /><button onClick={handleSendMessage} className="absolute bottom-3 right-3 p-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-white"><Play className="w-4 h-4" /></button></div></div></>
+           // Chat Panel
+           !activeFlow ? (
+               <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-500">
+                   <MessageSquare className="w-12 h-12 mb-2 opacity-20" />
+                   <p className="text-sm">Select a flow to chat with the AI Architect.</p>
+               </div>
+           ) : (
+                <>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {activeFlow.chatHistory.map(msg => (
+                        <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                            <div className={`p-3 rounded-lg text-sm shadow-md max-w-[95%] ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : (isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-700 border border-slate-200 shadow-sm') + ' rounded-bl-none border'}`}>
+                                {msg.text}
+                            </div>
+                        </div>
+                    ))} 
+                    <div ref={chatEndRef} />
+                </div>
+                <div className={`p-4 border-t ${borderPrimary} ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
+                    <div className="relative">
+                        <textarea className={`w-full border rounded-lg pl-3 pr-10 py-3 text-sm focus:outline-none focus:border-blue-500 resize-none h-24 ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`} placeholder={isOwner ? "Describe automation..." : "Duplicate to use AI chat..."} value={chatInput} disabled={!isOwner} onChange={e => setChatInput(e.target.value)} />
+                        <button onClick={handleSendMessage} className="absolute bottom-3 right-3 p-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-white"><Play className="w-4 h-4" /></button>
+                    </div>
+                </div>
+                </>
+           )
         ) : (
-          <><div className={`px-4 py-3 border-b ${borderPrimary} flex gap-1`}>{['all', 'mine', 'public'].map((f: any) => (<button key={f} onClick={() => setFlowListFilter(f)} className={`flex-1 text-[10px] uppercase font-bold py-1 px-2 rounded border transition-colors ${flowListFilter === f ? 'bg-blue-600 text-white border-blue-500' : (isDark ? 'text-slate-500 border-slate-800' : 'text-slate-500 border-slate-200')}`}>{f}</button>))}</div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-2">{filteredFlows.map(f => (<div key={f.id} onClick={() => { setActiveFlowId(f.id); setViewMode('editor'); }} className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer border ${activeFlowId === f.id ? (isDark ? 'bg-slate-800 border-blue-500/50' : 'bg-white border-blue-500 shadow-sm') : 'border-transparent'}`}><div className="flex gap-3 items-center">{f.isPublic ? <Globe className="w-4 h-4 text-green-500" /> : <Lock className="w-4 h-4 text-slate-500" />}<div><div className="font-medium text-sm truncate w-40">{f.name}</div><div className={`text-[10px] uppercase ${f.ownerId === user?.id ? 'text-blue-400' : 'text-slate-500'}`}>{f.ownerId === user?.id ? 'Owner' : 'Library'}</div></div></div>{f.ownerId === user?.id && <button onClick={(e) => handleDeleteFlow(f.id, e)} className="p-1.5 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>}</div>))}</div></>
+          // Flow List Panel
+          <>
+            <div className={`px-4 py-3 border-b ${borderPrimary} flex gap-1`}>
+                {['all', 'mine', 'public'].map((f: any) => (<button key={f} onClick={() => setFlowListFilter(f)} className={`flex-1 text-[10px] uppercase font-bold py-1 px-2 rounded border transition-colors ${flowListFilter === f ? 'bg-blue-600 text-white border-blue-500' : (isDark ? 'text-slate-500 border-slate-800' : 'text-slate-500 border-slate-200')}`}>{f}</button>))}
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                {filteredFlows.map(f => (
+                    <div key={f.id} onClick={() => { setActiveFlowId(f.id); setViewMode('editor'); }} className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer border ${activeFlowId === f.id ? (isDark ? 'bg-slate-800 border-blue-500/50' : 'bg-white border-blue-500 shadow-sm') : 'border-transparent'}`}>
+                        <div className="flex gap-3 items-center">
+                            {f.isPublic ? <Globe className="w-4 h-4 text-green-500" /> : <Lock className="w-4 h-4 text-slate-500" />}
+                            <div>
+                                <div className="font-medium text-sm truncate w-40">{f.name}</div>
+                                <div className={`text-[10px] uppercase ${f.ownerId === user?.id ? 'text-blue-400' : 'text-slate-500'}`}>{f.ownerId === user?.id ? 'Owner' : 'Library'}</div>
+                            </div>
+                        </div>
+                        {f.ownerId === user?.id && <button onClick={(e) => handleDeleteFlow(f.id, e)} className="p-1.5 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>}
+                    </div>
+                ))}
+                {filteredFlows.length === 0 && (
+                    <div className="text-center p-4 text-xs text-slate-500">No flows found.</div>
+                )}
+            </div>
+          </>
         )}
       </div>
+
       <div className="flex-1 flex flex-col min-w-0">
-        <header className={`h-14 border-b ${borderPrimary} ${bgHeader} flex items-center justify-between px-6 z-10`}><div className="flex items-center gap-4"><div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded flex items-center justify-center shadow-lg"><Cpu className="w-5 h-5 text-white" /></div>
-          {isEditingName && !isFallback ? (
-            <input 
-              ref={nameInputRef}
-              className={`bg-transparent font-bold leading-tight border-b-2 border-blue-500 focus:outline-none ${textPrimary}`}
-              value={activeFlow.name}
-              onChange={(e) => updateActiveFlow({ name: e.target.value })}
-              onBlur={() => { setIsEditingName(false); if(isOwner && activeFlow.flowId) handleSaveFlow(); }}
-              onKeyDown={(e) => { if (e.key === 'Enter') { setIsEditingName(false); if(isOwner && activeFlow.flowId) handleSaveFlow(); } }}
-            />
-          ) : (
-            <h1 
-              onDoubleClick={() => { if (isOwner && !isFallback) setIsEditingName(true); }} 
-              className={`font-bold leading-tight ${textPrimary} ${isOwner && !isFallback ? 'cursor-text hover:text-blue-400 transition-colors' : ''} ${isFallback ? 'text-slate-500 italic' : ''}`}
-              title={isOwner ? "Double-click to rename" : ""}
-            >
-              {activeFlow.name}
-            </h1>
-          )}
+        <header className={`h-14 border-b ${borderPrimary} ${bgHeader} flex items-center justify-between px-6 z-10`}>
+          <div className="flex items-center gap-4">
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded flex items-center justify-center shadow-lg"><Cpu className="w-5 h-5 text-white" /></div>
+              
+              {!activeFlow ? (
+                 <h1 className={`font-bold leading-tight ${textPrimary}`}>No Flow Selected</h1>
+              ) : isEditingName ? (
+                <input 
+                  ref={nameInputRef}
+                  className={`bg-transparent font-bold leading-tight border-b-2 border-blue-500 focus:outline-none ${textPrimary}`}
+                  value={activeFlow.name}
+                  onChange={(e) => updateActiveFlow({ name: e.target.value })}
+                  onBlur={() => { setIsEditingName(false); if(isOwner && activeFlow.flowId) handleSaveFlow(); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { setIsEditingName(false); if(isOwner && activeFlow.flowId) handleSaveFlow(); } }}
+                />
+              ) : (
+                <h1 
+                  onDoubleClick={() => { if (isOwner) setIsEditingName(true); }} 
+                  className={`font-bold leading-tight ${textPrimary} ${isOwner ? 'cursor-text hover:text-blue-400 transition-colors' : ''}`}
+                  title={isOwner ? "Double-click to rename" : ""}
+                >
+                  {activeFlow.name}
+                </h1>
+              )}
           </div>
+          
           <div className="flex items-center gap-3">
             {/* Watcher Indicator */}
             {watchers.length > 0 && watchers.some(w => w.active) && (
@@ -764,7 +927,7 @@ function App() {
             
             {/* IMPORT / EXPORT BUTTONS */}
             <div className="flex items-center border-r border-slate-700 pr-3 mr-1 gap-1">
-                <button onClick={handleExportJSON} title="Export Flow to JSON" className={`p-1.5 rounded transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-200'}`}>
+                <button onClick={handleExportJSON} disabled={!activeFlow} title="Export Flow to JSON" className={`p-1.5 rounded transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-200'} disabled:opacity-30`}>
                     <FileJson className="w-4 h-4" />
                 </button>
                 <button onClick={() => fileInputRef.current?.click()} title="Import Flow from JSON" className={`p-1.5 rounded transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-200'}`}>
@@ -772,23 +935,23 @@ function App() {
                 </button>
             </div>
 
-            {!activeFlow.isPublic ? (
+            {activeFlow && !activeFlow.isPublic ? (
                  isOwner && (
-                     <button onClick={handlePublish} disabled={isSaving || isFallback} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border transition-colors hover:bg-green-600 hover:text-white ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'} ${isSaving || isFallback ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                     <button onClick={handlePublish} disabled={isSaving} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border transition-colors hover:bg-green-600 hover:text-white ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'} ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}>
                          <CloudUpload className="w-3.5 h-3.5" /> Publish
                      </button>
                  )
-            ) : (
-                 <button onClick={handleImport} disabled={isSaving || isFallback} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border bg-purple-600 hover:bg-purple-500 text-white border-transparent shadow-lg ${isSaving || isFallback ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            ) : activeFlow && (
+                 <button onClick={handleImport} disabled={isSaving} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border bg-purple-600 hover:bg-purple-500 text-white border-transparent shadow-lg ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}>
                      <Import className="w-3.5 h-3.5" /> Import
                  </button>
             )}
 
-            <button onClick={() => setViewMode(prev => prev === 'editor' ? 'grid' : 'editor')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'}`}>{viewMode === 'editor' ? <><LayoutGrid className="w-3.5 h-3.5" /> Dashboard</> : <><Edit3 className="w-3.5 h-3.5" /> Editor</>}</button>
+            <button onClick={() => setViewMode(prev => prev === 'editor' ? 'grid' : 'editor')} disabled={!activeFlow} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'} disabled:opacity-50`}>{viewMode === 'editor' ? <><LayoutGrid className="w-3.5 h-3.5" /> Dashboard</> : <><Edit3 className="w-3.5 h-3.5" /> Editor</>}</button>
             <button onClick={handleCreateNewFlow} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'}`}><Plus className="w-3.5 h-3.5" /> New</button>
             
             <div className="flex items-center rounded-lg shadow-sm border overflow-hidden border-blue-600">
-                <button onClick={() => handleSaveFlow()} disabled={isSaving || isFallback || !isOwner} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-all ${isSaving || isFallback || !isOwner ? 'opacity-70 cursor-not-allowed' : ''}`}>
+                <button onClick={() => handleSaveFlow()} disabled={isSaving || !activeFlow || !isOwner} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-all ${isSaving || !activeFlow || !isOwner ? 'opacity-70 cursor-not-allowed' : ''}`}>
                 {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 
                 {isSaving ? 'Saving...' : 'Save'}
                 </button>
@@ -802,73 +965,101 @@ function App() {
             <div className="flex items-center gap-2 px-2 py-1 bg-slate-800/50 rounded-lg border border-slate-700"><UserIcon className="w-4 h-4 text-blue-400" /><span className="text-xs font-medium">{user?.username}</span><button onClick={handleLogout} className="text-red-400 hover:text-red-500"><LogOut className="w-3.5 h-3.5" /></button></div>
             <button onClick={() => setShowSettings(true)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-800"><Settings className="w-5 h-5" /></button>
             
-            <div className="flex items-center gap-1">
-                <input 
-                    type="number" 
-                    title="Timeout in Seconds"
-                    value={activeFlow.executionTimeout || 10}
-                    onChange={(e) => updateActiveFlow({ executionTimeout: parseInt(e.target.value) || 10 })}
-                    className={`w-12 py-2 text-center text-xs font-bold rounded-l-lg border-y border-l ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'} focus:outline-none`}
-                />
-                <button onClick={() => handleRun('run')} disabled={status !== AppStatus.IDLE || isFallback} className="flex items-center gap-2 px-4 py-2 rounded-r-lg font-bold text-sm bg-green-600 hover:bg-green-500 text-white shadow-lg transition-all disabled:opacity-50"><Play className="w-4 h-4 fill-current" /> Run</button>
-            </div>
+            {activeFlow && (
+                <div className="flex items-center gap-1">
+                    <input 
+                        type="number" 
+                        title="Timeout in Seconds"
+                        value={activeFlow.executionTimeout || 10}
+                        onChange={(e) => updateActiveFlow({ executionTimeout: parseInt(e.target.value) || 10 })}
+                        className={`w-12 py-2 text-center text-xs font-bold rounded-l-lg border-y border-l ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'} focus:outline-none`}
+                    />
+                    <button onClick={() => handleRun('run')} disabled={status !== AppStatus.IDLE} className="flex items-center gap-2 px-4 py-2 rounded-r-lg font-bold text-sm bg-green-600 hover:bg-green-500 text-white shadow-lg transition-all disabled:opacity-50"><Play className="w-4 h-4 fill-current" /> Run</button>
+                </div>
+            )}
           </div>
         </header>
-        {viewMode === 'editor' ? (
-          <div className="flex-1 p-3 grid grid-cols-3 grid-rows-[65%_35%] gap-3 overflow-hidden">
-            <FormRenderer 
-              schemaStr={activeFlow.uiSchema} 
-              formData={formData} 
-              onChange={setFormData} 
-              onSchemaChange={(code) => { if (isOwner) updateActiveFlow({ uiSchema: code }); }} 
-              theme={settings.theme} 
-              actions={detectedActions}
-              onRunAction={(action) => handleRun(action)}
-              isRunning={status === AppStatus.RUNNING}
-            />
-            <CodeEditor title="Node.js Orchestrator" language="javascript" icon={<Cpu className="w-4 h-4" />} code={activeFlow.nodeCode} readonly={false} onChange={(code) => updateActiveFlow({ nodeCode: code })} theme={settings.theme} />
-            <CodeEditor 
-                title="Host App Code (ExtendScript)" 
-                language="javascript" 
-                icon={<ImageIcon className="w-4 h-4" />} 
-                code={activeFlow.appCode} 
-                readonly={false} 
-                onChange={(code) => updateActiveFlow({ appCode: code })} 
-                theme={settings.theme} 
-                extraHeaderContent={
-                  <div className="flex items-center gap-2">
-                    <select 
-                        value={activeFlow.targetApp || ''}
-                        disabled={!isOwner} 
-                        onPointerDown={(e) => e.stopPropagation()} 
-                        onChange={(e) => {
-                            const newVal = e.target.value;
-                            if (newVal) updateActiveFlow({ targetApp: newVal });
-                        }} 
-                        className={`text-xs p-1.5 rounded border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'} w-full max-w-[200px] focus:outline-none focus:border-blue-500 transition-colors`}
-                    >
-                        {availableApps.length > 0 && activeFlow.targetApp && !availableApps.find(a => (a.specifier || a.id) === activeFlow.targetApp) && (
-                            <option key="saved-val" value={activeFlow.targetApp}>{activeFlow.targetApp} (Saved)</option>
-                        )}
-                        {availableApps.map(app => (
-                            <option key={app.specifier || app.id} value={app.specifier || app.id}>
-                                {app.name}
-                            </option>
-                        ))}
-                        {availableApps.length === 0 && (
-                            <>
-                                <option value="photoshop">Photoshop</option>
-                                <option value="illustrator">Illustrator</option>
-                                <option value="indesign">InDesign</option>
-                            </>
-                        )}
-                    </select>
-                  </div>
-                } 
-            />
-            <div className="col-span-3"><LogConsole logs={logs} isRunning={status === AppStatus.RUNNING} theme={settings.theme} /></div></div>
+        
+        {/* MAIN CONTENT AREA */}
+        {!activeFlow ? (
+             <div className="flex-1 flex flex-col items-center justify-center p-8 opacity-50 select-none">
+                 <div className="w-24 h-24 rounded-full bg-slate-800 mb-6 flex items-center justify-center">
+                    <Cpu className="w-10 h-10 text-slate-500" />
+                 </div>
+                 <h2 className="text-xl font-bold mb-2">Ready to Automate</h2>
+                 <p className="text-slate-500 max-w-sm text-center mb-8">Select a flow from the library or create a new one to get started.</p>
+                 <button onClick={handleCreateNewFlow} className="flex items-center gap-2 px-6 py-3 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 transition-all shadow-lg hover:shadow-blue-500/20">
+                     <Plus className="w-5 h-5" /> Create New Flow
+                 </button>
+             </div>
         ) : (
-          <div className="flex-1 overflow-y-auto p-8"><div className="grid grid-cols-4 gap-6">{filteredFlows.map(flow => (<div key={flow.id} className={`flex flex-col border rounded-xl overflow-hidden ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}><div className="p-4 border-b flex items-center justify-between"><div><h3 className="font-bold text-sm truncate w-32">{flow.name}</h3><span className="text-[10px] text-blue-500 uppercase font-bold">{flow.ownerId === user?.id ? 'Owner' : 'Library'}</span></div><button onClick={() => { setActiveFlowId(flow.id); setViewMode('editor'); }} className="p-2 rounded-full hover:bg-slate-200/20 text-slate-500"><Edit3 className="w-4 h-4" /></button></div><div className="p-3 flex flex-wrap gap-2">{extractActions(flow.nodeCode).map(a => (<button key={a} onClick={() => handleRun(a, flow)} className="flex-1 py-1.5 px-3 rounded text-xs font-semibold bg-blue-600 text-white">{a}</button>))}</div></div>))}</div></div>
+            viewMode === 'editor' ? (
+            <div className="flex-1 p-3 grid grid-cols-3 grid-rows-[65%_35%] gap-3 overflow-hidden">
+                <FormRenderer 
+                schemaStr={activeFlow.uiSchema} 
+                formData={formData} 
+                onChange={setFormData} 
+                onSchemaChange={(code) => { if (isOwner) updateActiveFlow({ uiSchema: code }); }} 
+                theme={settings.theme} 
+                actions={detectedActions}
+                onRunAction={(action) => handleRun(action)}
+                onInjectSnippet={handleInjectSnippet}
+                isRunning={status === AppStatus.RUNNING}
+                />
+                <CodeEditor 
+                    key={`node-${activeFlow.id}`}
+                    title="Node.js Orchestrator" 
+                    language="javascript" 
+                    icon={<Cpu className="w-4 h-4" />} 
+                    code={activeFlow.nodeCode} 
+                    readonly={false} 
+                    onChange={(code) => updateActiveFlow({ nodeCode: code })} 
+                    theme={settings.theme} 
+                />
+                <CodeEditor 
+                    key={`app-${activeFlow.id}`}
+                    title="Host App Code (ExtendScript)" 
+                    language="javascript" 
+                    icon={<ImageIcon className="w-4 h-4" />} 
+                    code={activeFlow.appCode} 
+                    readonly={false} 
+                    onChange={(code) => updateActiveFlow({ appCode: code })} 
+                    theme={settings.theme} 
+                    extraHeaderContent={
+                    <div className="flex items-center gap-2">
+                        <select 
+                            value={activeFlow.targetApp || ''}
+                            disabled={!isOwner} 
+                            onPointerDown={(e) => e.stopPropagation()} 
+                            onChange={(e) => {
+                                const newVal = e.target.value;
+                                if (newVal) updateActiveFlow({ targetApp: newVal });
+                            }} 
+                            className={`text-xs p-1.5 rounded border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'} w-full max-w-[200px] focus:outline-none focus:border-blue-500 transition-colors`}
+                        >
+                            {availableApps.length > 0 && activeFlow.targetApp && !availableApps.find(a => (a.specifier || a.id) === activeFlow.targetApp) && (
+                                <option key="saved-val" value={activeFlow.targetApp}>{activeFlow.targetApp} (Saved)</option>
+                            )}
+                            {availableApps.map(app => (
+                                <option key={app.specifier || app.id} value={app.specifier || app.id}>
+                                    {app.name}
+                                </option>
+                            ))}
+                            {availableApps.length === 0 && (
+                                <>
+                                    <option value="photoshop">Photoshop</option>
+                                    <option value="illustrator">Illustrator</option>
+                                    <option value="indesign">InDesign</option>
+                                </>
+                            )}
+                        </select>
+                    </div>
+                    } 
+                />
+                <div className="col-span-3"><LogConsole logs={logs} isRunning={status === AppStatus.RUNNING} theme={settings.theme} /></div></div>
+            ) : (
+            <div className="flex-1 overflow-y-auto p-8"><div className="grid grid-cols-4 gap-6">{filteredFlows.map(flow => (<div key={flow.id} className={`flex flex-col border rounded-xl overflow-hidden ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}><div className="p-4 border-b flex items-center justify-between"><div><h3 className="font-bold text-sm truncate w-32">{flow.name}</h3><span className="text-[10px] text-blue-500 uppercase font-bold">{flow.ownerId === user?.id ? 'Owner' : 'Library'}</span></div><button onClick={() => { setActiveFlowId(flow.id); setViewMode('editor'); }} className="p-2 rounded-full hover:bg-slate-200/20 text-slate-500"><Edit3 className="w-4 h-4" /></button></div><div className="p-3 flex flex-wrap gap-2">{extractActions(flow.nodeCode).map(a => (<button key={a} onClick={() => handleRun(a, flow)} className="flex-1 py-1.5 px-3 rounded text-xs font-semibold bg-blue-600 text-white">{a}</button>))}</div></div>))}</div></div>
+            )
         )}
       </div>
     </div>

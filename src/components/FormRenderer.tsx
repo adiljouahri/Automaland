@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { JSONSchema } from '../types';
-import { FileJson, Code, Eye, AlertTriangle, PlayCircle, Type, Hash, CheckSquare, List, FileText, Key, Copy } from 'lucide-react';
+import { FileJson, Code, Eye, AlertTriangle, PlayCircle, Type, Hash, CheckSquare, List, FileText, Key, Copy, FolderOpen, FileSearch } from 'lucide-react';
+import { CodeEditor } from './CodeEditor';
 
 interface FormRendererProps {
   schemaStr: string;
@@ -10,6 +11,7 @@ interface FormRendererProps {
   theme?: 'dark' | 'light';
   actions?: string[];
   onRunAction?: (actionName: string) => void;
+  onInjectSnippet?: (type: 'file_browser' | 'folder_browser') => void;
   isRunning?: boolean;
 }
 
@@ -21,6 +23,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   theme = 'dark',
   actions = [],
   onRunAction,
+  onInjectSnippet,
   isRunning = false
 }) => {
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
@@ -39,8 +42,28 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     onChange({ ...formData, [key]: value });
   };
 
-  const handleCopyKey = (key: string) => {
-      const codeSnippet = `utils.setUI('${key}', 'New Value');`;
+  const handleCopyKey = (key: string, prop: any) => {
+      // Determine the value to put in the snippet
+      let valSnippet = "'New Value'";
+      
+      // 1. If form has data, use that
+      if (formData[key] !== undefined) {
+          if (typeof formData[key] === 'string') {
+              valSnippet = `'${formData[key]}'`;
+          } else {
+              valSnippet = JSON.stringify(formData[key]);
+          }
+      } 
+      // 2. Fallback to schema type defaults
+      else if (prop.type === 'boolean') {
+          valSnippet = 'true';
+      } else if (prop.type === 'number' || prop.type === 'integer') {
+          valSnippet = '0';
+      } else if (prop.type === 'array') {
+          valSnippet = '[]';
+      }
+
+      const codeSnippet = `utils.setUI('${key}', ${valSnippet});`;
       navigator.clipboard.writeText(codeSnippet);
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 2000);
@@ -100,7 +123,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const inputBg = isDark ? "bg-slate-800" : "bg-white";
   const inputBorder = isDark ? "border-slate-600" : "border-slate-300";
   const inputText = isDark ? "text-white" : "text-slate-800";
-  const codeText = isDark ? "text-slate-300" : "text-slate-700";
+  // const codeText = isDark ? "text-slate-300" : "text-slate-700"; // Unused now
 
   return (
     <div className={`flex flex-col h-full ${headerBg} border ${containerBorder} rounded-lg overflow-hidden ${containerShadow} hover:shadow-xl transition-all`}>
@@ -139,22 +162,31 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             <button onClick={() => injectField('number')} title="Add Number Input" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><Hash className="w-3.5 h-3.5" /></button>
             <button onClick={() => injectField('boolean')} title="Add Checkbox" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><CheckSquare className="w-3.5 h-3.5" /></button>
             <button onClick={() => injectField('enum')} title="Add Dropdown" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><List className="w-3.5 h-3.5" /></button>
-            <button onClick={() => injectField('file')} title="Add File Path" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><FileText className="w-3.5 h-3.5" /></button>
+            
+            {/* Snippets Separator */}
+            <div className={`w-px h-4 mx-1 ${isDark ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
+            
+            <button onClick={() => onInjectSnippet && onInjectSnippet('file_browser')} title="Add File Picker (Smart Snippet)" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
+                <FileSearch className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => onInjectSnippet && onInjectSnippet('folder_browser')} title="Add Folder Picker (Smart Snippet)" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
+                <FolderOpen className="w-3.5 h-3.5" />
+            </button>
       </div>
 
       <div className={`flex-1 overflow-hidden relative ${contentBg} flex flex-col`}>
         <div className="flex-1 overflow-hidden relative">
         {viewMode === 'code' ? (
-             <textarea
-                className={`w-full h-full p-4 ${contentBg} ${codeText} font-mono text-xs leading-relaxed resize-none focus:outline-none selection:bg-blue-500/30`}
-                value={schemaStr}
-                onChange={(e) => onSchemaChange(e.target.value)}
-                spellCheck={false}
-                style={{ 
-                    fontFamily: "'Fira Code', 'Cascadia Code', 'Source Code Pro', Menlo, monospace",
-                    tabSize: 2
-                }}
-            />
+             <div className="h-full">
+               <CodeEditor 
+                  title="" 
+                  code={schemaStr} 
+                  onChange={onSchemaChange} 
+                  language="json" 
+                  theme={theme}
+                  readonly={isRunning}
+               />
+             </div>
         ) : !schema ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-500 p-6 text-center">
             <FileJson className="w-12 h-12 mb-2 opacity-50" />
@@ -176,7 +208,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                             
                             {/* Key/Variable Inspector */}
                             <button 
-                                onClick={() => handleCopyKey(key)}
+                                onClick={() => handleCopyKey(key, prop)}
                                 className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-all opacity-0 group-hover:opacity-100
                                 ${copiedKey === key 
                                     ? 'bg-green-500/10 border-green-500 text-green-500' 

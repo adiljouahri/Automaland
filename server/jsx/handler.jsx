@@ -18,7 +18,9 @@ requestHandler.prototype = {
   parse: function (req) {
     // $.writeln(req)
     var res=req;
+    
     if (typeof req == "string") {
+      if(req=='undefined'||req=='null')return req
       try{
         res=JSON.parse(unescape (decodeURIComponent (req)));
       }catch(err){

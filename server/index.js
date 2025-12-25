@@ -47,6 +47,7 @@ function broadcastLog(type, message) {
         type: type === 'HOST' ? 'info' : (type === 'ERROR' ? 'error' : 'info'), 
         message: message
     });
+    
     logClients.forEach(client => {
         client.write(`data: ${payload}\n\n`);
     });
@@ -168,7 +169,9 @@ logger.prototype.log = function (msg, event) {
     f.writeln(logLine);
     f.close();
     $.writeln(logLine);
-  } catch (e) {}
+  } catch (e) {
+      $.writeln("Logger Error: " + e.message);
+  }
 };
 var LOGGER = new logger("triPaneltApp");
 ` 
@@ -179,22 +182,29 @@ var LOGGER = new logger("triPaneltApp");
 function requestHandler() {}
 requestHandler.prototype = {
   parse: function (req) {
-    var res=req;
+    var res = {};
     if (typeof req == "string") {
-      try{
-        res=JSON.parse(unescape (decodeURIComponent (req)));
-      }catch(err){
-        try{
-            res=eval(req)
-        }catch(err){}
+      try {
+        // Decode URI component to handle special characters (including %27 for single quotes)
+        var decoded = decodeURIComponent(req);
+        res = JSON.parse(decoded);
+      } catch (e) {
+         if (LOGGER) LOGGER.log("RH.parse Error: " + e.message, "ERROR");
+         // Return empty object on failure to avoid script crash
+         res = {};
       }
-    }else {
-        return req
+    } else {
+        return req;
     }
-    return res
+    return res;
   },
   toString: function (res) {
-    return JSON.stringify(res);
+    try {
+        return JSON.stringify(res);
+    } catch(e) {
+        if (LOGGER) LOGGER.log("RH.toString Error: " + e.message, "ERROR");
+        return "{}";
+    }
   },
   args: {
     get: function (obj, key) {
@@ -344,7 +354,7 @@ async function runNodeCode({ code, triggerData, envVars, entryPoint, targetApp, 
             const formatPath = (p) => process.platform === 'win32' ? p.replace(/\\/g, '\\\\') : p;
 
             // Custom escape function for injecting data INTO ExtendScript
-            const escape = (val) => {
+            function escape2(key, val) {
                 if (typeof (val) != "string") return val;
                 return val
                     .replace(/[\\]/g, '\\\\')
@@ -355,20 +365,26 @@ async function runNodeCode({ code, triggerData, envVars, entryPoint, targetApp, 
                     .replace(/[\r]/g, '\\r')
                     .replace(/[\t]/g, '\\t')
                     .replace(/[\"]/g, '\\"')
+                    // .replace(/\\'/g, "\\'")
                     .replace(/'/g, "####");
-            };
+            }
 
             const encodeJSX = (obj) => {
-                // DEFAULT TO EMPTY OBJECT IF UNDEFINED/NULL
                 if (!obj) return '%7B%7D'; // Encoded "{}"
+                // DEFAULT TO EMPTY OBJECT IF UNDEFINED/NULL
                 try {
+                    var stringified = obj ? encodeURIComponent(escape2(JSON.stringify(obj))) : ''
                     // 1. Stringify to JSON
                     // 2. Escape using custom logic for the string literal
                     // 3. URI Encode to ensure transport safety through Bridge/OS
-                    const stringified = JSON.stringify(obj);
+                    // const stringified = JSON.stringify(obj);
                     return encodeURIComponent(escape(stringified));
-                } catch(e) { return '%7B%7D'; }
+                } catch (e) { 
+                    console.log(e.message)
+                    return '%7B%7D';
+                 }
             };
+
 
             // SAFE ENCODING
             const encodedState = encodeJSX(GLOBAL_STATE);
@@ -414,6 +430,7 @@ __tripanel_wrap__(function() {
                 try {
                     jsonResult = JSON.parse(resultRaw);
                 } catch (parseErr) {
+                    console.error("Failed to parse app response:", resultRaw);
                     throw new Error(`Invalid JSON returned from app: ${resultRaw}`);
                 }
 
@@ -443,7 +460,6 @@ __tripanel_wrap__(function() {
             setUI: (key, value) => {
                 const payload = {};
                 payload[key] = value;
-                console.log(payload)
                 broadcastLog('UI_SYNC', JSON.stringify(payload));
             }
         },
@@ -632,7 +648,7 @@ app.post('/api/watchers/sync', (req, res) => {
 // --- Dynamic Port Startup ---
 function startServer(retryPort) {
     const server = app.listen(retryPort, () => {
-        console.log(`Sidecar running on port--> ${retryPort}`);
+        console.log(`Sidecar running on port ${retryPort}`);
         PORT = retryPort; 
         
         try {

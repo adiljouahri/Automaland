@@ -33,10 +33,29 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     editorRef.current = editor;
   };
 
+  // --- SMART UPDATE LOGIC ---
+  // If 'code' prop changes from outside (e.g. AI generation or Snippet Injection),
+  // we update the editor value. But if the editor's current value matches 'code',
+  // we do nothing to avoid cursor jumps/resets during typing.
+  useEffect(() => {
+    if (editorRef.current) {
+        const model = editorRef.current.getModel();
+        if (model && model.getValue() !== code) {
+            // Check if user is actively typing? 
+            // Usually if model.getValue() !== code, it means 'code' changed externally 
+            // because onChange updates 'code' to match model.getValue().
+            // So this difference implies an external change.
+            editorRef.current.setValue(code);
+        }
+    }
+  }, [code]);
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (editorRef.current) {
+        navigator.clipboard.writeText(editorRef.current.getValue());
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const handleFormat = () => {
@@ -135,7 +154,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
             height="100%"
             defaultLanguage={language}
             language={language}
-            value={code}
+            // Use defaultValue for uncontrolled mode + effect for updates
+            defaultValue={code} 
             onChange={(value) => onChange && onChange(value || '')}
             theme={isDark ? "vs-dark" : "light"}
             options={{

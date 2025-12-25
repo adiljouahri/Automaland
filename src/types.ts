@@ -32,6 +32,7 @@ export interface AutomationFlow {
   ownerId?: number;
   history?: FlowVersion[]; // Version control
   executionTimeout?: number; // Timeout in seconds
+  savedFormData?: Record<string, any>; // Persisted UI values
 }
 
 export interface User {
