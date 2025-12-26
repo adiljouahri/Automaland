@@ -23,6 +23,10 @@ export class StrapiService {
     return !!this.token;
   }
 
+  getProviderAuthUrl(provider: 'google'): string {
+    return `${this.baseUrl}/api/connect/${provider}`;
+  }
+
   async login(identifier: string, password: string): Promise<AuthResponse> {
     const res = await fetch(`${this.baseUrl}/api/auth/local`, {
       method: 'POST',

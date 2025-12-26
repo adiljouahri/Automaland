@@ -39,6 +39,7 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  createdAt: string; // ISO Date string from Strapi
 }
 
 export interface AuthResponse {

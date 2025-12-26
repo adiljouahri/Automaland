@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson } from 'lucide-react';
+import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core'; // Import invoke from Tauri
 import { save } from '@tauri-apps/plugin-dialog';
+import { open } from '@tauri-apps/plugin-shell';
 import { CodeEditor } from './components/CodeEditor';
 import { FormRenderer } from './components/FormRenderer';
 import { LogConsole } from './components/LogConsole';
@@ -89,8 +90,14 @@ function App() {
   
   const strapi = useMemo(() => new StrapiService(settings.strapiUrl), [settings.strapiUrl]);
   const [user, setUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isPollingAuth, setIsPollingAuth] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authData, setAuthData] = useState({ identifier: '', password: '', email: '', username: '' });
+  const [manualToken, setManualToken] = useState('');
+  const [showManualToken, setShowManualToken] = useState(false);
   
   const [envVars, setEnvVars] = useState<EnvVariable[]>([]);
   
@@ -117,6 +124,32 @@ function App() {
       return localStorage.getItem('active_flow_id') || 'default-flow-1';
   });
 
+  // TRIAL LOGIC
+  const trialStatus = useMemo(() => {
+    if (!user) return { daysLeft: 0, isExpired: false };
+    const createdAt = new Date(user.createdAt).getTime();
+    const now = Date.now();
+    const diffTime = Math.abs(now - createdAt);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const daysLeft = 15 - diffDays;
+    return {
+        daysLeft: Math.max(0, daysLeft),
+        isExpired: daysLeft <= 0
+    };
+  }, [user]);
+
+  // LIMITS LOGIC
+  const flowLimitStatus = useMemo(() => {
+      if (!user) return { count: 0, limit: 20, isReached: false };
+      const myFlows = flows.filter(f => f.ownerId === user.id);
+      return {
+          count: myFlows.length,
+          limit: 20,
+          isReached: myFlows.length >= 20
+      };
+  }, [flows, user]);
+
+
   // Persist Active Flow ID
   useEffect(() => {
       if (activeFlowId) {
@@ -127,15 +160,10 @@ function App() {
   const activeFlow = useMemo(() => {
     const found = flows.find(f => f.id === activeFlowId);
     if (found) return found;
-    // Fallback logic inside the render mainly, but here we return undefined/null if not found
-    // If we have flows but ID is wrong, default to first
     if (flows.length > 0) return flows[0];
-    
-    // Completely empty state
     return null; 
   }, [flows, activeFlowId]);
   
-  // Fix: If activeFlow changes due to fallback logic above, sync the ID
   useEffect(() => {
       if (activeFlow && activeFlow.id !== activeFlowId) {
           setActiveFlowId(activeFlow.id);
@@ -143,14 +171,13 @@ function App() {
   }, [activeFlow, activeFlowId]);
 
   // --- SYNC FORM DATA ON FLOW SWITCH ---
-  // When switching between flows, load the saved form data into the state
   useEffect(() => {
       if (activeFlow) {
           setFormData(activeFlow.savedFormData || {});
       } else {
           setFormData({});
       }
-  }, [activeFlow?.id]); // Only run when the ID changes (switching flows)
+  }, [activeFlow?.id]);
 
   const isOwner = activeFlow ? (activeFlow.ownerId === user?.id || !activeFlow.ownerId || !activeFlow.isPublic) : false;
   
@@ -190,7 +217,29 @@ function App() {
       try {
         const data = JSON.parse(event.data);
         
-        // Handle UI Updates from Node.js (utils.setUI)
+        // Handle OAuth Success from Sidecar via SSE (Faster than polling)
+        if (data.source === 'AUTH_SUCCESS') {
+            try {
+                const authData = JSON.parse(data.message);
+                if (authData.jwt) {
+                    strapi.setToken(authData.jwt);
+                    strapi.getMe().then(u => {
+                        setUser(u);
+                        setIsAuthLoading(false);
+                        setIsPollingAuth(false);
+                        setAuthError(null);
+                        addLog(`Logged in as ${u.username}`, "SYSTEM", "success");
+                    }).catch(e => {
+                        console.error("Auth Success SSE received but validation failed:", e);
+                        // Let the polling loop catch this error to show it in UI
+                    });
+                }
+            } catch(e) {
+                console.error("Failed to parse Auth message:", e);
+            }
+            return;
+        }
+
         if (data.source === 'UI_SYNC') {
             try {
                 const updates = JSON.parse(data.message);
@@ -198,7 +247,7 @@ function App() {
             } catch(e) {
                 console.error("Failed to parse UI_SYNC message:", e);
             }
-            return; // Don't add to log console
+            return;
         }
 
         setLogs(prev => [...prev, { 
@@ -214,25 +263,115 @@ function App() {
     };
     eventSource.onerror = (e) => { eventSource.close(); };
     return () => { eventSource.close(); };
-  }, [settings.serverUrl]);
+  }, [settings.serverUrl, strapi, addLog]);
 
   useEffect(() => {
     LocalStoreService.init().catch(e => console.error("DB Init error", e));
   }, []);
 
+  // --- INITIAL AUTH CHECK ---
   useEffect(() => {
-    if (strapi.isAuthenticated()) {
-      strapi.getMe()
-        .then(u => {
-           setUser(u);
-           addLog(`Welcome back, ${u.username}`, "SYSTEM", "success");
-        })
-        .catch(() => {
-           strapi.logout();
-           setUser(null);
-        });
-    }
-  }, [strapi, addLog]);
+    const handleAuthCheck = async () => {
+        // Only run on initial mount if not already polling (user manually triggered login)
+        if (isPollingAuth) return;
+        
+        setIsAuthLoading(true);
+        
+        // 1. Check for Params (Web Mode Fallback)
+        const params = new URLSearchParams(window.location.search);
+        const jwt = params.get('jwt');
+        if (jwt) {
+             strapi.setToken(jwt);
+             window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        // 2. Validate current session
+        if (strapi.isAuthenticated()) {
+            try {
+                const u = await strapi.getMe();
+                setUser(u);
+                addLog(`Welcome back, ${u.username}`, "SYSTEM", "success");
+            } catch (e) {
+                console.warn("Session invalid or expired:", e);
+                strapi.logout(); // Critical: Clear bad token
+                setUser(null);
+            }
+        } else {
+            setUser(null);
+        }
+        setIsAuthLoading(false);
+    };
+    handleAuthCheck();
+  }, [strapi, addLog]); // Intentionally minimal deps
+
+  // --- POLLING FOR AUTH (ROBUST) ---
+  useEffect(() => {
+     if (!isPollingAuth) return;
+     
+     const interval = setInterval(async () => {
+        try {
+            const res = await fetch(`${settings.serverUrl}/api/auth/poll`);
+            if (res.ok) {
+                const authState = await res.json();
+                
+                // Status: success | error | idle | pending
+                if (authState.status === 'success' && authState.data && authState.data.jwt) {
+                    const receivedToken = authState.data.jwt;
+                    strapi.setToken(receivedToken);
+                    
+                    try {
+                        const u = await strapi.getMe();
+                        setUser(u);
+                        setIsPollingAuth(false);
+                        setIsAuthLoading(false);
+                        setAuthError(null);
+                        addLog(`Logged in as ${u.username}`, "SYSTEM", "success");
+                    } catch(validationErr: any) {
+                         // Token was returned but Strapi rejected it. 
+                         // It might be an access_token that needs exchanging (like in manual mode).
+                         console.warn("Direct Validation Failed. Attempting Token Exchange...", validationErr);
+                         
+                         try {
+                             const cleanStrapiUrl = settings.strapiUrl.replace(/\/$/, "");
+                             const exchangeUrl = `${cleanStrapiUrl}/api/auth/google/callback?access_token=${receivedToken}`;
+                             const exRes = await fetch(exchangeUrl);
+                             const exData = await exRes.json();
+                             
+                             if (exData.jwt && exData.user) {
+                                 strapi.setToken(exData.jwt);
+                                 setUser(exData.user);
+                                 setIsPollingAuth(false);
+                                 setIsAuthLoading(false);
+                                 setAuthError(null);
+                                 addLog(`Logged in as ${exData.user.username}`, "SYSTEM", "success");
+                             } else {
+                                 throw new Error("Exchange failed");
+                             }
+                         } catch (exErr) {
+                             console.error("Token exchange failed:", exErr);
+                             setAuthError(`Authentication Failed. The token was received but invalid.`);
+                             strapi.logout();
+                             setIsPollingAuth(false);
+                             setIsAuthLoading(false);
+                             setShowManualToken(true);
+                         }
+                    }
+                } else if (authState.status === 'error') {
+                    // Server reported an error from the callback (e.g. Strapi failed to create user)
+                    setAuthError(`Login Failed: ${authState.error || "Unknown Error"}`);
+                    setIsPollingAuth(false);
+                    setIsAuthLoading(false);
+                    // Automatically show manual token screen on error
+                    setShowManualToken(true);
+                }
+            }
+        } catch(e) {
+            // Network error during poll - just retry
+        }
+     }, 1000); 
+     return () => clearInterval(interval);
+  }, [isPollingAuth, settings.serverUrl, settings.strapiUrl, strapi, addLog]);
+
 
   const loadAllFlows = async () => {
     const localFlows = await LocalStoreService.getFlows(user?.id);
@@ -251,10 +390,8 @@ function App() {
             }
         });
         
-        // If previous state had items, try to preserve order or re-sort
         const merged = Array.from(flowMap.values()).sort((a, b) => b.createdAt - a.createdAt);
         if (merged.length === 0) {
-            // Seed default if absolutely nothing exists
             return [{
                 id: 'default-flow-1',
                 flowId: 'default-uuid-1',
@@ -294,18 +431,14 @@ function App() {
   const handleSaveFlow = async (flowToSave?: AutomationFlow) => {
     if (isSavingRef.current) return;
     
-    // IMPORTANT: Always grab the freshest version of the active flow from the state array
-    // 'activeFlow' from useMemo might be stale inside async closures depending on timing
-    // We try to use the argument first, then fall back to finding it in current 'flows'
     const targetId = flowToSave?.id || activeFlowId;
     const freshFlow = flows.find(f => f.id === targetId);
 
     if (!freshFlow) return;
 
-    // Merge current state into target, specifically saving the current Form Data
     const target = { 
         ...freshFlow, 
-        savedFormData: formData, // Persist current UI inputs
+        savedFormData: formData,
         ...(flowToSave || {}) 
     };
 
@@ -329,13 +462,11 @@ function App() {
                 appCode: target.appCode,
                 uiSchema: target.uiSchema
             };
-            const updatedHistory = [newVersion, ...(target.history || [])].slice(0, 15);
+            const updatedHistory = [newVersion, ...(target.history || [])].slice(15);
             const flowWithHistory = { ...target, history: updatedHistory };
             
-            // Save to DB
             await LocalStoreService.saveFlow(flowWithHistory);
             
-            // Update React State immediately to reflect history change & saved data
             updateActiveFlow({ 
                 history: updatedHistory,
                 savedFormData: formData 
@@ -356,12 +487,11 @@ function App() {
     if (!activeFlow) return;
     const exportData = {
         ...activeFlow,
-        history: [], // Keep export light
-        id: undefined // Don't export React ID
+        history: [], 
+        id: undefined 
     };
     const content = JSON.stringify(exportData, null, 2);
 
-    // Native Tauri File Save
     if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
       try {
         const filePath = await save({
@@ -373,7 +503,6 @@ function App() {
         });
 
         if (filePath) {
-          // Use custom Rust command to write file
           await invoke('save_text_file', { path: filePath, content });
           addLog(`Exported Flow to ${filePath}`, "SYSTEM", "success");
         }
@@ -381,7 +510,6 @@ function App() {
         addLog(`Export Failed: ${e.message}`, "SYSTEM", "error");
       }
     } else {
-      // Browser Fallback
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(content);
       const downloadAnchorNode = document.createElement('a');
       downloadAnchorNode.setAttribute("href", dataStr);
@@ -407,7 +535,7 @@ function App() {
                     const importedFlow: AutomationFlow = {
                         ...parsed,
                         id: newId,
-                        flowId: crypto.randomUUID(), // New UUID for import
+                        flowId: crypto.randomUUID(), 
                         name: `${parsed.name} (Imported)`,
                         ownerId: user?.id,
                         isPublic: false,
@@ -427,7 +555,6 @@ function App() {
             }
         };
     }
-    // Reset input
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -443,17 +570,13 @@ function App() {
       addLog(`Restored version from ${new Date(v.timestamp).toLocaleTimeString()}`, "SYSTEM", "info");
   };
 
-  // --- PERSIST WATCHERS ---
   useEffect(() => {
       localStorage.setItem('app_watchers', JSON.stringify(watchers));
   }, [watchers]);
 
-  // --- SYNC WATCHERS WITH SERVER ---
   useEffect(() => {
-    // Filter only active watchers
     const activeWatchersList = watchers.filter(w => w.active);
     
-    // Even if list is empty, we send it so server stops removed/inactive watchers
     if (true) {
       const configs = activeWatchersList.map(w => {
         const flow = flows.find(f => f.id === w.flowId);
@@ -531,8 +654,84 @@ function App() {
      addLog(`Created local copy.`, "SYSTEM", "success");
   };
 
+  const handleGoogleLogin = async () => {
+      setAuthError(null);
+      
+      const cleanStrapiUrl = settings.strapiUrl.replace(/\/$/, "");
+
+      // Pass the strapiUrl so the Sidecar can attempt a token exchange if the raw redirect fails to include a JWT
+      const sidecarCallback = `${settings.serverUrl}/api/auth/callback?strapiUrl=${encodeURIComponent(cleanStrapiUrl)}`;
+      
+      console.log("[Auth] Starting Google Login. Callback:", sidecarCallback);
+      
+      // Construct Strapi Connect URL
+      const url = `${cleanStrapiUrl}/api/connect/google?callback=${encodeURIComponent(sidecarCallback)}`;
+      
+      // Strict loading mode enables polling in useEffect
+      setIsAuthLoading(true);
+      setIsPollingAuth(true);
+
+      try {
+        await open(url);
+      } catch (e) {
+        // Fallback for web mode
+        window.location.href = url;
+      }
+  };
+
+  const handleManualTokenLogin = async () => {
+      if (!manualToken.trim()) return;
+      
+      setIsAuthLoading(true);
+      setAuthError(null);
+      
+      const token = manualToken.trim();
+
+      try {
+          // 1. Try treating it as a standard Strapi JWT
+          strapi.setToken(token);
+          const u = await strapi.getMe();
+          setUser(u);
+          addLog(`Logged in manually as ${u.username}`, "SYSTEM", "success");
+          setIsAuthLoading(false);
+          setIsPollingAuth(false);
+          return;
+      } catch (e: any) {
+          console.warn("Standard JWT validation failed. Attempting Provider Token Exchange...", e.message);
+      }
+
+      // 2. If valid JWT failed (401), assume user pasted a Google Access Token
+      // We attempt to exchange it via Strapi's backend
+      try {
+          const cleanStrapiUrl = settings.strapiUrl.replace(/\/$/, "");
+          // Strapi provider callback expects 'access_token' for Google
+          const exchangeUrl = `${cleanStrapiUrl}/api/auth/google/callback?access_token=${token}`;
+          
+          const res = await fetch(exchangeUrl);
+          const data = await res.json();
+          
+          if (data.jwt && data.user) {
+              strapi.setToken(data.jwt);
+              setUser(data.user);
+              addLog(`exchanged Google Token for User: ${data.user.username}`, "SYSTEM", "success");
+              setIsAuthLoading(false);
+              setIsPollingAuth(false);
+          } else {
+              throw new Error(data.error?.message || "Token exchange failed");
+          }
+      } catch (exchangeErr: any) {
+           console.error("Manual Token Exchange Failed:", exchangeErr);
+           setAuthError(`Invalid Token. If this is a Google Token, Strapi rejected it: ${exchangeErr.message}`);
+           strapi.logout();
+           setIsAuthLoading(false);
+           setIsPollingAuth(false);
+      }
+  };
+
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsAuthLoading(true);
+    setAuthError(null);
     try {
       if (authMode === 'login') {
         const res = await strapi.login(authData.identifier, authData.password);
@@ -542,7 +741,9 @@ function App() {
         setUser(res.user);
       }
     } catch (e: any) {
-      alert("Auth Failed: " + e.message);
+      setAuthError(e.message);
+    } finally {
+        setIsAuthLoading(false);
     }
   };
 
@@ -600,6 +801,15 @@ function App() {
   };
 
   const handleCreateNewFlow = () => {
+    if (flowLimitStatus.isReached) {
+        alert("Flow Limit Reached. You can only create 20 flows during the trial.");
+        return;
+    }
+    if (trialStatus.isExpired) {
+        alert("Trial Expired. Please upgrade to continue creating flows.");
+        return;
+    }
+
     const newId = `flow-${Date.now()}`;
     const defaultApp = availableApps.length > 0 ? (availableApps[0].specifier || availableApps[0].id) : 'photoshop';
     const newFlow: AutomationFlow = {
@@ -627,13 +837,9 @@ function App() {
 
   const handleDeleteFlow = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    
-    // Allow deleting the last flow to clear the workspace
     const flowToDelete = flows.find(f => f.id === id);
     if (!flowToDelete) return;
-    
     if(!confirm(`Delete flow "${flowToDelete.name}"? This cannot be undone.`)) return;
-
     try {
         if (flowToDelete.isPublic) {
              if(strapi.isAuthenticated()) await strapi.deletePublicFlow(flowToDelete.flowId);
@@ -644,21 +850,21 @@ function App() {
     } catch(e: any) {
         addLog(`Failed to delete: ${e.message}`, "SYSTEM", "error");
     }
-    
     const newFlows = flows.filter(f => f.id !== id);
     setFlows(newFlows);
-    
     if (activeFlowId === id) {
-        if (newFlows.length > 0) {
-            setActiveFlowId(newFlows[0].id);
-        } else {
-            setActiveFlowId(''); // Clear selection
-        }
+        if (newFlows.length > 0) setActiveFlowId(newFlows[0].id);
+        else setActiveFlowId(''); 
     }
   };
 
   const handleSendMessage = async () => {
     if (!activeFlow) return;
+    if (trialStatus.isExpired) {
+        const warning: ChatMessage = { id: Date.now().toString(), role: 'model', text: 'Trial Expired. AI Architect features are disabled.', timestamp: new Date() };
+        updateActiveFlow({ chatHistory: [...activeFlow.chatHistory, warning] });
+        return;
+    }
     if (!isOwner) {
        alert("Duplicate this flow to use AI chat.");
        return;
@@ -682,8 +888,6 @@ function App() {
     const timestamp = Date.now().toString().slice(-4);
     const key = type === 'file_browser' ? `filePath_${timestamp}` : `folderPath_${timestamp}`;
     const actionName = type === 'file_browser' ? `browse_file_${timestamp}` : `browse_folder_${timestamp}`;
-
-    // 1. Update Schema
     try {
         const newSchema = JSON.parse(activeFlow.uiSchema);
         if (!newSchema.properties) newSchema.properties = {};
@@ -693,8 +897,6 @@ function App() {
             default: "" 
         };
         const newSchemaStr = JSON.stringify(newSchema, null, 2);
-
-        // 2. Update Host App Code
         let newAppCode = activeFlow.appCode;
         if (!newAppCode.includes("function selectfolder")) {
             newAppCode += `\n\nfunction selectfolder() {\n  var fold = Folder.selectDialog("Select Folder");\n  if (fold) return fold.fsName.replace(/\\\\/g, "/");\n  return "Error";\n}`;
@@ -702,20 +904,10 @@ function App() {
         if (!newAppCode.includes("function selectfile")) {
             newAppCode += `\n\nfunction selectfile() {\n  var fold = File.openDialog("Select File");\n  if (fold) return fold.fsName.replace(/\\\\/g, "/");\n  return "Error";\n}`;
         }
-
-        // 3. Update Node Code
-        // FIX: Add 'return' to the $.run_jsx string to ensure the result is passed back from ES3
         const jsFunction = type === 'file_browser' ? 'return selectfile()' : 'return selectfolder()';
         const newNodeCode = activeFlow.nodeCode + `\n\n// Action: Browse ${type === 'file_browser' ? 'File' : 'Folder'}\nexports.${actionName} = async () => {\n  const result = await $.run_jsx('${jsFunction}');\n  if (result && result !== "Error") {\n    utils.setUI('${key}', result);\n  }\n};`;
-
-        updateActiveFlow({
-            uiSchema: newSchemaStr,
-            appCode: newAppCode,
-            nodeCode: newNodeCode
-        });
-        
+        updateActiveFlow({ uiSchema: newSchemaStr, appCode: newAppCode, nodeCode: newNodeCode });
         addLog(`Injected ${type === 'file_browser' ? 'File' : 'Folder'} Picker Snippet`, "SYSTEM", "success");
-
     } catch (e: any) {
         addLog(`Snippet injection failed: ${e.message}`, "SYSTEM", "error");
     }
@@ -725,7 +917,6 @@ function App() {
     if (status !== AppStatus.IDLE) return;
     const targetFlow = specificFlow || activeFlow;
     if (!targetFlow) return;
-    
     setStatus(AppStatus.RUNNING);
     addLog(`Starting '${entryPoint}'...`, "SYSTEM");
     try {
@@ -736,7 +927,7 @@ function App() {
            entryPoint, 
            targetApp: targetFlow.targetApp,
            timeout: targetFlow.executionTimeout || 10,
-           appCode: targetFlow.appCode // Pass the ExtendScript code to the backend
+           appCode: targetFlow.appCode 
        };
        const res = await safeServerRequest('/api/execute/node', { 
            method: 'POST', 
@@ -768,8 +959,41 @@ function App() {
     return true; 
   }), [flows, flowListFilter, user?.id]);
 
-  if (!user && !strapi.isAuthenticated()) {
-    // ... (Login Screen - Same as before)
+  if (isAuthLoading) {
+     return (
+        <div className={`flex items-center justify-center min-h-screen ${bgMain}`}>
+            <div className="flex flex-col items-center">
+                <Loader2 className="w-10 h-10 animate-spin text-blue-500 mb-4" />
+                <h2 className={`${textPrimary} text-lg font-bold`}>
+                    {isPollingAuth ? "Waiting for Browser Login..." : "Verifying Session..."}
+                </h2>
+                <p className={`${textSecondary} text-sm mt-2 max-w-xs text-center`}>
+                    {isPollingAuth 
+                        ? "Please complete the login process in the browser window that just opened."
+                        : "Connecting to server..."}
+                </p>
+                
+                {authError && (
+                    <div className="mt-4 p-3 bg-red-900/20 border border-red-500/50 rounded text-red-400 text-xs max-w-xs text-center">
+                        {authError}
+                    </div>
+                )}
+                
+                {isPollingAuth && (
+                    <button 
+                        onClick={() => { setIsAuthLoading(false); setIsPollingAuth(false); setAuthError(null); }}
+                        className="mt-6 px-4 py-2 rounded text-xs font-bold bg-slate-800 text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 transition-all"
+                    >
+                        Cancel Login
+                    </button>
+                )}
+            </div>
+        </div>
+     );
+  }
+
+  if (!user) {
+    // ... (Login Screen)
     return (
       <div className={`flex items-center justify-center min-h-screen ${bgMain} p-6`}>
         <div className={`max-w-md w-full rounded-2xl p-8 shadow-2xl border ${borderPrimary} ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
@@ -778,17 +1002,70 @@ function App() {
               <h2 className={`text-2xl font-bold ${textPrimary}`}>TriPanel Automator</h2>
               <p className={`text-sm ${textSecondary}`}>Sign in to sync your flows</p>
            </div>
-           <form onSubmit={handleAuth} className="space-y-4">
-              {authMode === 'register' && (
-                <><input type="text" placeholder="Username" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.username} onChange={e => setAuthData({...authData, username: e.target.value})} />
-                <input type="email" placeholder="Email" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.email} onChange={e => setAuthData({...authData, email: e.target.value})} /></>
-              )}
-              <input type="text" placeholder="Identifier" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.identifier} onChange={e => setAuthData({...authData, identifier: e.target.value})} />
-              <input type="password" placeholder="Password" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.password} onChange={e => setAuthData({...authData, password: e.target.value})} />
-              <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-all">{authMode === 'login' ? 'Login' : 'Register'}</button>
-           </form>
-           <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="mt-6 w-full text-center text-sm text-blue-500 hover:underline">{authMode === 'login' ? "New here? Register" : "Have an account? Login"}</button>
+           
+           {authError && (
+                <div className="mb-6 p-3 bg-red-900/20 border border-red-500/50 rounded flex items-center gap-2 text-red-400 text-xs">
+                    <AlertOctagon className="w-4 h-4 shrink-0" />
+                    <span>{authError}</span>
+                </div>
+            )}
+
+            {!showManualToken ? (
+                <>
+                <form onSubmit={handleAuth} className="space-y-4">
+                    {authMode === 'register' && (
+                        <><input type="text" placeholder="Username" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.username} onChange={e => setAuthData({...authData, username: e.target.value})} />
+                        <input type="email" placeholder="Email" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.email} onChange={e => setAuthData({...authData, email: e.target.value})} /></>
+                    )}
+                    <input type="text" placeholder="Identifier" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.identifier} onChange={e => setAuthData({...authData, identifier: e.target.value})} />
+                    <input type="password" placeholder="Password" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.password} onChange={e => setAuthData({...authData, password: e.target.value})} />
+                    <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-all">{authMode === 'login' ? 'Login' : 'Register'}</button>
+                    
+                    <div className="relative flex py-2 items-center">
+                        <div className={`flex-grow border-t ${borderPrimary}`}></div>
+                        <span className={`flex-shrink mx-4 text-xs ${textSecondary}`}>OR</span>
+                        <div className={`flex-grow border-t ${borderPrimary}`}></div>
+                    </div>
+                    
+                    <button 
+                        type="button" 
+                        onClick={handleGoogleLogin}
+                        className={`w-full flex items-center justify-center gap-2 py-3 rounded-lg border transition-all ${isDark ? 'bg-white text-slate-800 hover:bg-slate-100' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                    >
+                        <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" /><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" /><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.26.81-.58z" /><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" /></svg>
+                        Continue with Google
+                    </button>
+                </form>
+                <div className="flex justify-between mt-4">
+                    <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="text-sm text-blue-500 hover:underline">{authMode === 'login' ? "New here? Register" : "Have an account? Login"}</button>
+                    <button onClick={() => setShowManualToken(true)} className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1"><Key className="w-3 h-3"/> Paste Token</button>
+                </div>
+                </>
+            ) : (
+                <div className="space-y-4">
+                    <p className={`text-xs ${textSecondary} mb-2`}>
+                        If the automatic login fails, copy the ID token (starts with ey...) from your browser URL and paste it here.
+                    </p>
+                    <textarea 
+                        value={manualToken} 
+                        onChange={e => setManualToken(e.target.value)} 
+                        placeholder="Paste Token here..."
+                        className={`w-full p-3 rounded-lg border h-32 text-xs font-mono resize-none focus:outline-none focus:border-blue-500 ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`}
+                    />
+                    <button 
+                        onClick={handleManualTokenLogin} 
+                        disabled={!manualToken.trim()}
+                        className={`w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-all ${!manualToken.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        Login with Token
+                    </button>
+                    <button onClick={() => setShowManualToken(false)} className="w-full text-center text-sm text-slate-500 hover:text-slate-300">Back</button>
+                </div>
+            )}
+           
+           <button onClick={() => setShowSettings(true)} className="absolute top-4 right-4 p-2 text-slate-500 hover:bg-slate-200/20 rounded"><Settings className="w-5 h-5" /></button>
         </div>
+        <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} settings={settings} onSaveSettings={setSettings} envVars={envVars} setEnvVars={setEnvVars} watchers={watchers} setWatchers={setWatchers} packages={packages} setPackages={setPackages} availableFlows={flows} />
       </div>
     );
   }
@@ -888,6 +1165,27 @@ function App() {
             </div>
           </>
         )}
+        
+        {/* ACCOUNT STATUS FOOTER */}
+        {user && (
+            <div className={`p-3 text-[10px] border-t ${borderPrimary} ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+                <div className="flex justify-between items-center mb-1">
+                    <span className="font-bold text-slate-500">Trial Status</span>
+                    <span className={trialStatus.isExpired ? 'text-red-500 font-bold' : 'text-green-500'}>{trialStatus.isExpired ? 'EXPIRED' : `${trialStatus.daysLeft} days left`}</span>
+                </div>
+                <div className="w-full h-1 bg-slate-700 rounded-full overflow-hidden mb-2">
+                    <div className={`h-full ${trialStatus.isExpired ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${(trialStatus.daysLeft / 15) * 100}%` }}></div>
+                </div>
+
+                <div className="flex justify-between items-center mb-1">
+                    <span className="font-bold text-slate-500">Flow Limit</span>
+                    <span className={flowLimitStatus.isReached ? 'text-red-500 font-bold' : 'text-slate-400'}>{flowLimitStatus.count} / {flowLimitStatus.limit}</span>
+                </div>
+                <div className="w-full h-1 bg-slate-700 rounded-full overflow-hidden">
+                    <div className={`h-full ${flowLimitStatus.isReached ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${(flowLimitStatus.count / flowLimitStatus.limit) * 100}%` }}></div>
+                </div>
+            </div>
+        )}
       </div>
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -924,6 +1222,13 @@ function App() {
                      <Eye className="w-3.5 h-3.5" /> Watching
                  </div>
             )}
+
+            {/* Expired Warning */}
+            {trialStatus.isExpired && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-red-500/10 border border-red-500/30 text-red-500 text-xs font-bold">
+                    <AlertOctagon className="w-3.5 h-3.5" /> Trial Expired
+                </div>
+            )}
             
             {/* IMPORT / EXPORT BUTTONS */}
             <div className="flex items-center border-r border-slate-700 pr-3 mr-1 gap-1">
@@ -948,7 +1253,14 @@ function App() {
             )}
 
             <button onClick={() => setViewMode(prev => prev === 'editor' ? 'grid' : 'editor')} disabled={!activeFlow} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'} disabled:opacity-50`}>{viewMode === 'editor' ? <><LayoutGrid className="w-3.5 h-3.5" /> Dashboard</> : <><Edit3 className="w-3.5 h-3.5" /> Editor</>}</button>
-            <button onClick={handleCreateNewFlow} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-600 border-slate-300'}`}><Plus className="w-3.5 h-3.5" /> New</button>
+            
+            <button 
+                onClick={handleCreateNewFlow} 
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border transition-colors ${flowLimitStatus.isReached || trialStatus.isExpired ? 'opacity-50 cursor-not-allowed bg-slate-700 text-slate-400' : (isDark ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-300')}`}
+                title={flowLimitStatus.isReached ? "Flow Limit Reached" : trialStatus.isExpired ? "Trial Expired" : "Create New"}
+            >
+                <Plus className="w-3.5 h-3.5" /> New
+            </button>
             
             <div className="flex items-center rounded-lg shadow-sm border overflow-hidden border-blue-600">
                 <button onClick={() => handleSaveFlow()} disabled={isSaving || !activeFlow || !isOwner} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-all ${isSaving || !activeFlow || !isOwner ? 'opacity-70 cursor-not-allowed' : ''}`}>
@@ -988,7 +1300,7 @@ function App() {
                  </div>
                  <h2 className="text-xl font-bold mb-2">Ready to Automate</h2>
                  <p className="text-slate-500 max-w-sm text-center mb-8">Select a flow from the library or create a new one to get started.</p>
-                 <button onClick={handleCreateNewFlow} className="flex items-center gap-2 px-6 py-3 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 transition-all shadow-lg hover:shadow-blue-500/20">
+                 <button onClick={handleCreateNewFlow} className={`flex items-center gap-2 px-6 py-3 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 transition-all shadow-lg hover:shadow-blue-500/20 ${(trialStatus.isExpired || flowLimitStatus.isReached) ? 'opacity-50 cursor-not-allowed bg-slate-700' : ''}`}>
                      <Plus className="w-5 h-5" /> Create New Flow
                  </button>
              </div>

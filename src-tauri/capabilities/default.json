@@ -2,7 +2,9 @@
   "identifier": "default",
   "description": "Default permissions for the app",
   "local": true,
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "dialog:default",
@@ -15,6 +17,7 @@
           "args": true
         }
       ]
-    }
+    },
+    "shell:allow-open"
   ]
 }

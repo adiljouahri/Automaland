@@ -1,4 +1,5 @@
 
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -41,9 +42,15 @@ function writeToDisk(type, ...args) {
 const logClients = [];
 
 function broadcastLog(type, message) {
+    // Determine source based on type, allowing explicit AUTH_SUCCESS and UI_SYNC
+    let source = 'NODE';
+    if (['HOST', 'UI_SYNC', 'AUTH_SUCCESS'].includes(type)) {
+        source = type;
+    }
+
     const payload = JSON.stringify({
         timestamp: new Date().toLocaleTimeString(),
-        source: type === 'HOST' ? 'HOST' : (type === 'UI_SYNC' ? 'UI_SYNC' : 'NODE'),
+        source: source,
         type: type === 'HOST' ? 'info' : (type === 'ERROR' ? 'error' : 'info'), 
         message: message
     });
@@ -504,6 +511,177 @@ app.get('/api/logs', (req, res) => {
         const index = logClients.indexOf(res);
         if (index !== -1) logClients.splice(index, 1);
     });
+});
+
+// Auth State Machine
+let authState = {
+    status: 'idle', // idle, pending, success, error
+    data: null,
+    error: null,
+    timestamp: 0
+};
+
+app.get('/api/auth/poll', (req, res) => {
+    // Check timeout (2 minute expiry to allow for slow user action)
+    if (Date.now() - authState.timestamp > 120000 && authState.status !== 'idle') {
+         // Don't auto-clear success state too aggressively, the frontend might be slow to poll
+         if (authState.status === 'pending') {
+            authState = { status: 'idle', data: null, error: null, timestamp: 0 };
+         }
+    }
+    res.json(authState);
+});
+
+app.get('/api/auth/callback', async (req, res) => {
+    // Debug log to see exactly what Strapi sent us
+    console.log("[Auth] Callback Received. Query Keys:", Object.keys(req.query));
+
+    // Strapi standard Oauth return: ?id_token=...&access_token=...&jwt=...&user=...
+    let { jwt, user, error, access_token, id_token, strapiUrl } = req.query;
+    
+    // --- 1. Defensive Parsing ---
+    if (Array.isArray(jwt)) jwt = jwt[jwt.length - 1];
+    if (Array.isArray(user)) user = user[user.length - 1];
+    if (Array.isArray(error)) error = error[0];
+    if (Array.isArray(access_token)) access_token = access_token[0];
+    if (Array.isArray(id_token)) id_token = id_token[0];
+    if (Array.isArray(strapiUrl)) strapiUrl = strapiUrl[0];
+
+    if (typeof jwt === 'string') jwt = jwt.trim();
+    if (typeof access_token === 'string') access_token = access_token.trim();
+    
+    // --- 2. Error Handling from Provider ---
+    if (error) {
+        const errorMsg = typeof error === 'string' ? error : JSON.stringify(error);
+        console.error("[Auth] Provider returned error:", errorMsg);
+        authState = { status: 'error', error: errorMsg, data: null, timestamp: Date.now() };
+        return res.status(400).send(`
+            <html><body style="font-family:sans-serif;text-align:center;padding:50px;">
+                <h1 style="color:red">Login Failed</h1>
+                <p>Provider Error: ${errorMsg}</p>
+            </body></html>
+        `);
+    }
+
+    const targetStrapi = strapiUrl || 'http://localhost:1337';
+    const cleanStrapi = targetStrapi.replace(/\/$/, "");
+
+    // --- 3. TOKEN EXCHANGE (Recovery for 'access_token' mode) ---
+    // Pass the access_token to the frontend as the 'jwt'.
+    // The frontend will handle the exchange if it's not a valid JWT.
+    if (!jwt && access_token) {
+        console.log("[Auth] 'access_token' found. Passing to frontend for validation/exchange.");
+        jwt = access_token;
+    }
+
+    // --- 4. RECOVERY: ID Token Exchange ---
+    // Same logic if we only got an id_token
+    if (!jwt && id_token) {
+        try {
+            console.log("[Auth] Attempting Google Token Exchange via id_token...");
+            const exchangeUrl = `${cleanStrapi}/api/auth/google/callback?access_token=${id_token}`;
+            const response = await axios.get(exchangeUrl);
+            if (response.data && response.data.jwt) {
+                jwt = response.data.jwt;
+                if(response.data.user) user = response.data.user;
+                console.log("[Auth] Token Exchange Successful (id_token).");
+            }
+        } catch(e) {
+            console.error(`[Auth] Token Exchange (id_token) Failed: ${e.message}`);
+        }
+    }
+
+    // --- 5. Validation ---
+    if (!jwt) {
+        console.warn("[Auth] No JWT resolved.");
+        authState = { status: 'error', error: "Login Incomplete: No valid JWT found.", data: null, timestamp: Date.now() };
+        return res.status(400).send(`
+            <html><body style="font-family:sans-serif;text-align:center;padding:50px;">
+                <h1 style="color:orange">Login Incomplete</h1>
+                <p>No valid session token could be retrieved.</p>
+            </body></html>
+        `);
+    }
+
+    // --- 6. Success Processing ---
+    let parsedUser = null;
+
+    // Check if we already have a user object
+    if (user) {
+        if (typeof user === 'string') {
+             // Basic check to ensure it's not HTML before parsing
+             if (user.trim().startsWith('<')) {
+                 console.warn("[Auth] Received HTML instead of JSON user object. Ignoring.");
+             } else {
+                 try { parsedUser = JSON.parse(user); } catch(e) {}
+             }
+        } else if (typeof user === 'object') {
+             parsedUser = user;
+        }
+    }
+
+    // If still no user, fetch from Strapi
+    if (!parsedUser && jwt) {
+         try {
+             // Best-effort fetch.
+             const checkRes = await axios.get(`${cleanStrapi}/api/users/me`, {
+                headers: { 
+                    'Authorization': `Bearer ${jwt}`,
+                    'Accept': 'application/json'
+                },
+                timeout: 5000
+            });
+            // Ensure response is JSON
+            if (checkRes.status === 200 && checkRes.data && !((typeof checkRes.data === 'string') && checkRes.data.trim().startsWith('<'))) {
+                parsedUser = checkRes.data;
+            }
+         } catch(e) {
+             const errMsg = e.response ? `Status ${e.response.status}` : e.message;
+             console.log(`[Auth] User fetch failed (${errMsg}). Using placeholder.`);
+         }
+    }
+
+    // Fallback if still null
+    if (!parsedUser) {
+        parsedUser = { username: 'Visitor', id: 0, email: 'loading@tripanel.app' };
+    }
+    
+    try {
+        const payload = {
+            jwt: jwt,
+            user: parsedUser
+        };
+        
+        console.log("[Auth] Login Flow Complete. Sending to Frontend.");
+        writeToDisk('AUTH', `Login success for: ${parsedUser.username}`);
+
+        authState = {
+            status: 'success',
+            data: payload,
+            error: null,
+            timestamp: Date.now()
+        };
+        
+        broadcastLog('AUTH_SUCCESS', JSON.stringify(payload));
+        
+        res.send(`
+            <html>
+                <body style="font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background: #f0f9ff; color: #0c4a6e; text-align: center; padding: 20px;">
+                    <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 500px; width: 100%;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #0ea5e9; margin-bottom: 20px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                        <h1 style="margin: 0 0 10px 0; font-size: 24px;">Login Successful</h1>
+                        <p style="margin-bottom: 20px; color: #64748b;">You can close this window.</p>
+                        <textarea readonly style="width: 100%; height: 60px; font-family: monospace; font-size: 11px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; resize: none; background: #f8fafc; color: #334155;">${jwt}</textarea>
+                        <script>setTimeout(() => { try { window.close(); } catch(e){} }, 3000);</script>
+                    </div>
+                </body>
+            </html>
+        `);
+    } catch (e) {
+        console.error("[Auth] Fatal Error during Success Processing:", e);
+        authState = { status: 'error', error: "Internal Error", data: null, timestamp: Date.now() };
+        res.status(500).send("Internal Error.");
+    }
 });
 
 app.get('/api/adobe/apps', async (req, res) => {
