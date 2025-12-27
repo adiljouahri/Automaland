@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { JSONSchema } from '../types';
-import { FileJson, Code, Eye, AlertTriangle, PlayCircle, Type, Hash, CheckSquare, List, FileText, Key, Copy, FolderOpen, FileSearch } from 'lucide-react';
+import { FileJson, Code, Eye, AlertTriangle, PlayCircle, Type, Hash, CheckSquare, List, Key, Copy, FolderOpen, FileSearch } from 'lucide-react';
 import { CodeEditor } from './CodeEditor';
 
 interface FormRendererProps {
@@ -32,7 +32,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   
   const { schema, error } = useMemo(() => {
     try {
-      return { schema: JSON.parse(schemaStr) as JSONSchema, error: null };
+      if (!schemaStr || schemaStr.trim() === '') return { schema: { type: 'object', properties: {} }, error: null };
+      const parsed = JSON.parse(schemaStr);
+      return { schema: parsed as JSONSchema, error: null };
     } catch (e: any) {
       return { schema: null, error: e.message };
     }
@@ -43,19 +45,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   };
 
   const handleCopyKey = (key: string, prop: any) => {
-      // Determine the value to put in the snippet
       let valSnippet = "'New Value'";
-      
-      // 1. If form has data, use that
       if (formData[key] !== undefined) {
           if (typeof formData[key] === 'string') {
               valSnippet = `'${formData[key]}'`;
           } else {
               valSnippet = JSON.stringify(formData[key]);
           }
-      } 
-      // 2. Fallback to schema type defaults
-      else if (prop.type === 'boolean') {
+      } else if (prop.type === 'boolean') {
           valSnippet = 'true';
       } else if (prop.type === 'number' || prop.type === 'integer') {
           valSnippet = '0';
@@ -123,7 +120,6 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const inputBg = isDark ? "bg-slate-800" : "bg-white";
   const inputBorder = isDark ? "border-slate-600" : "border-slate-300";
   const inputText = isDark ? "text-white" : "text-slate-800";
-  // const codeText = isDark ? "text-slate-300" : "text-slate-700"; // Unused now
 
   return (
     <div className={`flex flex-col h-full ${headerBg} border ${containerBorder} rounded-lg overflow-hidden ${containerShadow} hover:shadow-xl transition-all`}>
@@ -155,7 +151,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         </div>
       </div>
       
-      {/* TOOLBAR - Always Visible */}
+      {/* TOOLBAR */}
       <div className={`flex items-center gap-1 px-3 py-2 border-b ${headerBorder} ${isDark ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
             <span className="text-[10px] uppercase font-bold text-slate-500 mr-2">Add:</span>
             <button onClick={() => injectField('string')} title="Add Text Input" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><Type className="w-3.5 h-3.5" /></button>
@@ -163,13 +159,12 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             <button onClick={() => injectField('boolean')} title="Add Checkbox" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><CheckSquare className="w-3.5 h-3.5" /></button>
             <button onClick={() => injectField('enum')} title="Add Dropdown" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><List className="w-3.5 h-3.5" /></button>
             
-            {/* Snippets Separator */}
             <div className={`w-px h-4 mx-1 ${isDark ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
             
-            <button onClick={() => onInjectSnippet && onInjectSnippet('file_browser')} title="Add File Picker (Smart Snippet)" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
+            <button onClick={() => onInjectSnippet && onInjectSnippet('file_browser')} title="Add File Picker" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
                 <FileSearch className="w-3.5 h-3.5" />
             </button>
-            <button onClick={() => onInjectSnippet && onInjectSnippet('folder_browser')} title="Add Folder Picker (Smart Snippet)" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
+            <button onClick={() => onInjectSnippet && onInjectSnippet('folder_browser')} title="Add Folder Picker" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
                 <FolderOpen className="w-3.5 h-3.5" />
             </button>
       </div>
@@ -199,81 +194,89 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 <p className="text-sm text-slate-500 mb-6">{schema.description}</p>
 
                 <form className="space-y-5" onSubmit={(e) => e.preventDefault()}>
-                {schema.properties && Object.entries(schema.properties).map(([key, prop]: [string, any]) => (
-                    <div key={key} className="flex flex-col gap-1.5 group relative">
-                        <div className="flex justify-between items-center">
-                            <label className={`text-xs font-medium uppercase tracking-wider flex items-center gap-2 ${labelColor}`}>
-                                {prop.title || key}
-                            </label>
-                            
-                            {/* Key/Variable Inspector */}
-                            <button 
-                                onClick={() => handleCopyKey(key, prop)}
-                                className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-all opacity-0 group-hover:opacity-100
-                                ${copiedKey === key 
-                                    ? 'bg-green-500/10 border-green-500 text-green-500' 
-                                    : (isDark ? 'bg-slate-800 border-slate-700 text-slate-500 hover:text-blue-400' : 'bg-slate-100 border-slate-300 text-slate-500 hover:text-blue-600')}`}
-                                title={`Key: "${key}" - Click to copy Node.js setUI code`}
-                            >
-                                {copiedKey === key ? <Copy className="w-3 h-3" /> : <Key className="w-3 h-3" />}
-                                <span className="font-mono">{key}</span>
-                            </button>
-                        </div>
-                        
-                        {prop.description && (
-                            <span className="text-xs text-slate-500 mb-1">{prop.description}</span>
-                        )}
+                {schema.properties && Object.keys(schema.properties).length > 0 ? (
+                    Object.entries(schema.properties).map(([key, prop]: [string, any]) => {
+                        // Fallback handling
+                        const fieldType = prop.type || 'string';
+                        const isEnum = Array.isArray(prop.enum);
+                        const isBool = fieldType === 'boolean';
+                        const isNum = fieldType === 'integer' || fieldType === 'number';
 
-                        {prop.enum ? (
-                            <select
-                            value={formData[key] || prop.default || ''}
-                            onChange={(e) => handleChange(key, e.target.value)}
-                            className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
-                            >
-                                <option value="" disabled>Select an option</option>
-                            {prop.enum.map((opt: string) => (
-                                <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                            </select>
-                        ) : prop.type === 'boolean' ? (
-                            <div className="flex items-center gap-2 mt-1">
-                                <input
-                                    type="checkbox"
-                                    checked={formData[key] || prop.default || false}
-                                    onChange={(e) => handleChange(key, e.target.checked)}
-                                    className={`w-4 h-4 rounded ${inputBorder} ${inputBg} text-blue-500 focus:ring-blue-500`}
-                                />
-                                <span className={`text-sm ${labelColor}`}>{prop.title || key}</span>
+                        return (
+                        <div key={key} className="flex flex-col gap-1.5 group relative">
+                            <div className="flex justify-between items-center">
+                                <label className={`text-xs font-medium uppercase tracking-wider flex items-center gap-2 ${labelColor}`}>
+                                    {prop.title || key}
+                                </label>
+                                
+                                <button 
+                                    onClick={() => handleCopyKey(key, prop)}
+                                    className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-all opacity-0 group-hover:opacity-100
+                                    ${copiedKey === key 
+                                        ? 'bg-green-500/10 border-green-500 text-green-500' 
+                                        : (isDark ? 'bg-slate-800 border-slate-700 text-slate-500 hover:text-blue-400' : 'bg-slate-100 border-slate-300 text-slate-500 hover:text-blue-600')}`}
+                                    title={`Key: "${key}" - Click to copy Node.js setUI code`}
+                                >
+                                    {copiedKey === key ? <Copy className="w-3 h-3" /> : <Key className="w-3 h-3" />}
+                                    <span className="font-mono">{key}</span>
+                                </button>
                             </div>
-                        ) : prop.type === 'integer' || prop.type === 'number' ? (
-                            <input
-                            type="number"
-                            value={formData[key] || prop.default || ''}
-                            onChange={(e) => handleChange(key, Number(e.target.value))}
-                            className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
-                            placeholder="0"
-                            />
-                        ) : (
-                            <input
-                            type="text"
-                            value={formData[key] || prop.default || ''}
-                            onChange={(e) => handleChange(key, e.target.value)}
-                            className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
-                            placeholder={key === 'file' ? '/path/to/file.png' : 'Enter text...'}
-                            />
-                        )}
-                    </div>
-                ))}
+                            
+                            {prop.description && (
+                                <span className="text-xs text-slate-500 mb-1">{prop.description}</span>
+                            )}
 
-                    {(!schema.properties || Object.keys(schema.properties).length === 0) && (
-                        <div className="text-sm text-slate-500 italic">No properties defined in schema.</div>
-                    )}
+                            {isEnum ? (
+                                <select
+                                value={formData[key] || prop.default || ''}
+                                onChange={(e) => handleChange(key, e.target.value)}
+                                className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                                >
+                                    <option value="" disabled>Select an option</option>
+                                {prop.enum.map((opt: string) => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                                </select>
+                            ) : isBool ? (
+                                <div className="flex items-center gap-2 mt-1">
+                                    <input
+                                        type="checkbox"
+                                        checked={formData[key] || prop.default || false}
+                                        onChange={(e) => handleChange(key, e.target.checked)}
+                                        className={`w-4 h-4 rounded ${inputBorder} ${inputBg} text-blue-500 focus:ring-blue-500`}
+                                    />
+                                    <span className={`text-sm ${labelColor}`}>{prop.title || key}</span>
+                                </div>
+                            ) : isNum ? (
+                                <input
+                                type="number"
+                                value={formData[key] || prop.default || ''}
+                                onChange={(e) => handleChange(key, Number(e.target.value))}
+                                className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                                placeholder="0"
+                                />
+                            ) : (
+                                <input
+                                type="text"
+                                value={formData[key] || prop.default || ''}
+                                onChange={(e) => handleChange(key, e.target.value)}
+                                className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                                placeholder={key.toLowerCase().includes('path') ? '/path/to/...' : 'Enter text...'}
+                                />
+                            )}
+                        </div>
+                    )})
+                ) : (
+                    <div className="text-sm text-slate-500 italic p-4 text-center border border-dashed rounded opacity-50 border-slate-500">
+                        No form fields defined. <br/>
+                        Use the toolbar or edit the JSON Schema to add inputs.
+                    </div>
+                )}
                 </form>
             </div>
         )}
         </div>
 
-        {/* Action Buttons Footer */}
         {viewMode === 'preview' && actions.length > 0 && (
           <div className={`p-3 border-t ${headerBorder} ${isDark ? 'bg-slate-900' : 'bg-slate-50'} grid grid-cols-2 gap-2`}>
             {actions.map(action => (

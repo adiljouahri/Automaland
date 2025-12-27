@@ -28,24 +28,29 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   const isDark = theme === 'dark';
   
   const editorRef = useRef<any>(null);
+  const monacoRef = useRef<any>(null);
 
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    monacoRef.current = monaco;
   };
-
-  // --- SMART UPDATE LOGIC ---
-  // If 'code' prop changes from outside (e.g. AI generation or Snippet Injection),
-  // we update the editor value. But if the editor's current value matches 'code',
-  // we do nothing to avoid cursor jumps/resets during typing.
+  
+  // FIX: Cursor Jumping Issue
+  // Instead of using the `value` prop which forces a full re-render on every keystroke (causing cursor jump),
+  // we check if the external code prop is different from the current editor model. 
+  // If it is different (e.g. from AI generation), we update it. 
+  // If it matches (user typing), we do nothing.
   useEffect(() => {
     if (editorRef.current) {
-        const model = editorRef.current.getModel();
-        if (model && model.getValue() !== code) {
-            // Check if user is actively typing? 
-            // Usually if model.getValue() !== code, it means 'code' changed externally 
-            // because onChange updates 'code' to match model.getValue().
-            // So this difference implies an external change.
+        const currentValue = editorRef.current.getValue();
+        // Only update if the content has actually changed from the outside
+        // and is not just the user typing (which updates `code` via onChange)
+        if (code !== currentValue) {
+            // Check if the difference is significant (not just formatting) to avoid minor jumps
+            // Ideally we preserve cursor state if we must update
+            const position = editorRef.current.getPosition();
             editorRef.current.setValue(code);
+            if (position) editorRef.current.setPosition(position);
         }
     }
   }, [code]);
@@ -154,14 +159,15 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
             height="100%"
             defaultLanguage={language}
             language={language}
-            // Use defaultValue for uncontrolled mode + effect for updates
-            defaultValue={code} 
+            defaultValue={code} // Use defaultValue for initialization
+            // DO NOT USE 'value={code}' here to prevent cursor jumping
             onChange={(value) => onChange && onChange(value || '')}
             theme={isDark ? "vs-dark" : "light"}
             options={{
-                minimap: { enabled: isFullScreen }, // Only show minimap in fullscreen
+                minimap: { enabled: isFullScreen },
                 fontSize: isFullScreen ? 15 : 13,
                 readOnly: readonly,
+                wordWrap: 'on', // Enable word wrap to help with one-line code issues
                 fontFamily: "'Fira Code', 'Cascadia Code', 'Source Code Pro', Menlo, monospace",
                 fontLigatures: true,
                 scrollBeyondLastLine: false,

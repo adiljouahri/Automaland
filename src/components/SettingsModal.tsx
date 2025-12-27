@@ -237,17 +237,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </div>
                 
-                {settings.aiProvider === 'gemini' ? (
-                     <div className={`p-3 rounded border text-xs ${isDark ? 'bg-blue-900/20 border-blue-800 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
-                        Gemini API Key is configured via process.env.API_KEY.
-                     </div>
-                ) : (
                 <div>
                     <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${labelText}`}>API Key</label>
-                    <input type="password" value={settings.aiApiKey} onChange={e => onSaveSettings({...settings, aiApiKey: e.target.value})} className={`w-full ${inputBg} border ${inputBorder} rounded p-3 ${inputText} text-sm`} placeholder="Paste your API key here..." />
+                    <input type="password" value={settings.aiApiKey} onChange={e => onSaveSettings({...settings, aiApiKey: e.target.value})} className={`w-full ${inputBg} border ${inputBorder} rounded p-3 ${inputText} text-sm`} placeholder={`Paste your ${settings.aiProvider} API key here...`} />
                     <p className="mt-2 text-[10px] text-slate-500">Your key is stored locally in your browser's local storage.</p>
                 </div>
-                )}
 
                 {(settings.aiProvider === 'custom' || settings.aiProvider === 'openai') && (
                   <div>

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key } from 'lucide-react';
+import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key, CheckSquare, Square } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core'; // Import invoke from Tauri
 import { save } from '@tauri-apps/plugin-dialog';
 import { open } from '@tauri-apps/plugin-shell';
@@ -188,6 +188,9 @@ function App() {
   const [formData, setFormData] = useState<Record<string, any>>({});
   
   const [chatInput, setChatInput] = useState('');
+  // Context inclusion state
+  const [includeContext, setIncludeContext] = useState(true);
+  
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [isEditingName, setIsEditingName] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -462,7 +465,8 @@ function App() {
                 appCode: target.appCode,
                 uiSchema: target.uiSchema
             };
-            const updatedHistory = [newVersion, ...(target.history || [])].slice(15);
+            // FIX: Keep the latest 15 versions. .slice(0, 15) keeps first 15 (newest).
+            const updatedHistory = [newVersion, ...(target.history || [])].slice(0, 15);
             const flowWithHistory = { ...target, history: updatedHistory };
             
             await LocalStoreService.saveFlow(flowWithHistory);
@@ -876,8 +880,19 @@ function App() {
     setChatInput('');
     setStatus(AppStatus.GENERATING);
     try {
-      const result = await generateAutomationFlow(newUserMsg.text, settings, activeFlow);
-      updateActiveFlow({ ...result, chatHistory: [...updatedHistory, { id: (Date.now() + 1).toString(), role: 'model', text: `Architecture Updated.`, timestamp: new Date() }] });
+      // Pass includeContext to decide whether to send flow context and logs
+      const result = await generateAutomationFlow(
+          newUserMsg.text, 
+          settings, 
+          includeContext ? activeFlow : undefined,
+          includeContext ? logs : undefined
+      ) as any;
+      
+      const explanation = result.explanation || "Architecture Updated.";
+      const flowUpdates = { ...result };
+      delete flowUpdates.explanation;
+      
+      updateActiveFlow({ ...flowUpdates, chatHistory: [...updatedHistory, { id: (Date.now() + 1).toString(), role: 'model', text: explanation, timestamp: new Date() }] });
     } catch (e: any) {
       updateActiveFlow({ chatHistory: [...updatedHistory, { id: (Date.now() + 1).toString(), role: 'model', text: `Error: ${e.message}`, timestamp: new Date() }] });
     } finally { setStatus(AppStatus.IDLE); }
@@ -1133,6 +1148,17 @@ function App() {
                     <div ref={chatEndRef} />
                 </div>
                 <div className={`p-4 border-t ${borderPrimary} ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
+                    {/* Include Context Checkbox */}
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                        <button 
+                            onClick={() => setIncludeContext(!includeContext)} 
+                            className={`flex items-center gap-1.5 text-xs font-medium transition-colors ${includeContext ? 'text-blue-500' : 'text-slate-500'}`}
+                        >
+                            {includeContext ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+                            Include Flow & Logs Context
+                        </button>
+                    </div>
+
                     <div className="relative">
                         <textarea className={`w-full border rounded-lg pl-3 pr-10 py-3 text-sm focus:outline-none focus:border-blue-500 resize-none h-24 ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`} placeholder={isOwner ? "Describe automation..." : "Duplicate to use AI chat..."} value={chatInput} disabled={!isOwner} onChange={e => setChatInput(e.target.value)} />
                         <button onClick={handleSendMessage} className="absolute bottom-3 right-3 p-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-white"><Play className="w-4 h-4" /></button>
