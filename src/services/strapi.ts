@@ -68,8 +68,9 @@ export class StrapiService {
 
   /**
    * Helper to look up a Public Flow by UUID
+   * Returns object containing id, documentId, and attributes
    */
-  private async lookupPublicByFlowId(flowId: string): Promise<{ id: number, attributes: any } | null> {
+  private async lookupPublicByFlowId(flowId: string): Promise<{ id: number, documentId?: string, attributes?: any, [key: string]: any } | null> {
       try {
           const res = await fetch(`${this.baseUrl}/api/flow-publics?filters[flowId][$eq]=${flowId}&status=published`, {
               headers: { 'Authorization': `Bearer ${this.token}` }
@@ -88,7 +89,7 @@ export class StrapiService {
   /**
    * FETCH PUBLIC FLOWS ONLY
    */
-  async getPublicFlows(): Promise<AutomationFlow[]> {
+  async getPublicFlows(user?: User | null): Promise<AutomationFlow[]> {
     if (!this.token) return [];
     try {
       const res = await fetch(`${this.baseUrl}/api/flow-publics?populate=*&sort=createdAt:desc&pagination[pageSize]=100&status=published`, {
@@ -99,6 +100,7 @@ export class StrapiService {
 
       return (json.data || []).map((item: any) => {
         let id = item.id;
+        let documentId = item.documentId; // Strapi 5 Public ID
         
         // Safely check for env variable to disable ID fix
         let disableIdFix = false;
@@ -109,7 +111,7 @@ export class StrapiService {
             }
         } catch(e) {}
 
-        if (!disableIdFix) id = id - 1;
+        if (!disableIdFix && typeof id === 'number') id = id - 1;
 
         const attrs = item.attributes || item; 
         
@@ -123,6 +125,7 @@ export class StrapiService {
         return {
           id: `public-${id}`, 
           strapiId: id,
+          documentId: documentId,
           flowId: attrs.flowId || `legacy-${id}`,
           name: attrs.name || 'Untitled Flow',
           uiSchema: attrs.uiSchema || '{}',
@@ -147,7 +150,7 @@ export class StrapiService {
   /**
    * Save a Public Flow (Updates if exists, Creates if new)
    */
-  async savePublicFlow(flow: AutomationFlow): Promise<{ id: number, formattedId: string }> {
+  async savePublicFlow(flow: AutomationFlow, user?: User | null): Promise<{ id: number, formattedId: string }> {
     if (!this.token) throw new Error('Not authenticated');
     if (!flow.flowId) throw new Error("Flow is missing UUID flowId");
 
@@ -171,7 +174,9 @@ export class StrapiService {
     // 3. Action
     let url, method;
     if (existing) {
-        url = `${this.baseUrl}/api/flow-publics/${existing.id}?status=published`;
+        // Strapi 5 uses documentId, Strapi 4 uses id
+        const identifier = existing.documentId || existing.id;
+        url = `${this.baseUrl}/api/flow-publics/${identifier}?status=published`;
         method = 'PUT';
     } else {
         url = `${this.baseUrl}/api/flow-publics?status=published`;
@@ -205,7 +210,9 @@ export class StrapiService {
     if (!this.token) return;
     const record = await this.lookupPublicByFlowId(flowId);
     if (record) {
-            await fetch(`${this.baseUrl}/api/flow-publics/${record.id}`, {
+        // Strapi 5 uses documentId, Strapi 4 uses id
+        const identifier = record.documentId || record.id;
+        await fetch(`${this.baseUrl}/api/flow-publics/${identifier}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${this.token}` },
         });

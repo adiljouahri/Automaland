@@ -17,7 +17,8 @@ export interface FlowVersion {
 
 export interface AutomationFlow {
   id: string; // React Key (e.g. private-5, flow-123)
-  strapiId?: number; // DB ID (Unreliable for identity, used only for specific PUT ops found via lookup)
+  strapiId?: number; // DB ID (Unreliable for identity in v5, used for keys)
+  documentId?: string; // Strapi 5 Document ID (Required for Content API calls)
   flowId: string; // Stable UUID - The Source of Truth
   name: string;
   uiSchema: string;

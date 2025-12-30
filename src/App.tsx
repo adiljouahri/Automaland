@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key, CheckSquare, Square } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core'; // Import invoke from Tauri
-import { save } from '@tauri-apps/plugin-dialog';
+import { save, ask } from '@tauri-apps/plugin-dialog';
 import { open } from '@tauri-apps/plugin-shell';
 import { CodeEditor } from './components/CodeEditor';
 import { FormRenderer } from './components/FormRenderer';
@@ -196,7 +196,16 @@ function App() {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
   const isSavingRef = useRef(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const isDark = settings.theme === 'dark';
+
+  // Helper for confirmations
+  const confirmAction = async (msg: string, title: string = "Confirmation") => {
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+          return await ask(msg, { title, kind: 'warning' });
+      }
+      return window.confirm(msg);
+  };
 
   const safeServerRequest = useCallback(async (endpoint: string, options?: RequestInit) => {
     try {
@@ -377,10 +386,12 @@ function App() {
 
 
   const loadAllFlows = async () => {
-    const localFlows = await LocalStoreService.getFlows(user?.id);
+    // Pass user object to LocalStoreService
+    const localFlows = await LocalStoreService.getFlows(user);
     let publicFlows: AutomationFlow[] = [];
     if (strapi.isAuthenticated() && user) {
-        publicFlows = await strapi.getPublicFlows();
+        // Pass user object to StrapiService
+        publicFlows = await strapi.getPublicFlows(user);
     }
 
     setFlows(prev => {
@@ -453,7 +464,8 @@ function App() {
     try {
         if (target.isPublic) {
             if (!strapi.isAuthenticated()) throw new Error("Must be logged in to save public flows.");
-            await strapi.savePublicFlow(target);
+            // Pass user object to savePublicFlow
+            await strapi.savePublicFlow(target, user);
             await LocalStoreService.deleteFlow(target.flowId);
             addLog(`Flow "${target.name}" published/updated to Cloud.`, "SYSTEM", "success");
         } else {
@@ -469,7 +481,8 @@ function App() {
             const updatedHistory = [newVersion, ...(target.history || [])].slice(0, 15);
             const flowWithHistory = { ...target, history: updatedHistory };
             
-            await LocalStoreService.saveFlow(flowWithHistory);
+            // Pass user object to saveFlow
+            await LocalStoreService.saveFlow(flowWithHistory, user);
             
             updateActiveFlow({ 
                 history: updatedHistory,
@@ -551,7 +564,7 @@ function App() {
                     
                     setFlows(prev => [importedFlow, ...prev]);
                     setActiveFlowId(newId);
-                    await LocalStoreService.saveFlow(importedFlow);
+                    await LocalStoreService.saveFlow(importedFlow, user);
                     addLog("Imported Flow successfully.", "SYSTEM", "success");
                 }
             } catch (err) {
@@ -562,8 +575,8 @@ function App() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handleRestoreVersion = (v: FlowVersion) => {
-      if(!confirm(`Restore version from ${new Date(v.timestamp).toLocaleString()}? Unsaved changes will be lost.`)) return;
+  const handleRestoreVersion = async (v: FlowVersion) => {
+      if(!(await confirmAction(`Restore version from ${new Date(v.timestamp).toLocaleString()}? Unsaved changes will be lost.`, "Restore Version"))) return;
       updateActiveFlow({
           name: v.name,
           nodeCode: v.nodeCode,
@@ -610,7 +623,9 @@ function App() {
         alert("Please login to publish flows.");
         return;
     }
-    if(!confirm("Publish to Public Cloud? This will make the flow visible to everyone. You can't undo this action (only delete).")) return;
+    
+    if(!(await confirmAction("Publish to Public Cloud? This will make the flow visible to everyone. You can't undo this action (only delete).", "Publish Flow"))) return;
+    
     const updatedFlow = { ...activeFlow, isPublic: true };
     updateActiveFlow({ isPublic: true });
     await handleSaveFlow(updatedFlow);
@@ -634,7 +649,7 @@ function App() {
     };
     setFlows(prev => [importedFlow, ...prev]);
     setActiveFlowId(newId);
-    await LocalStoreService.saveFlow(importedFlow);
+    await LocalStoreService.saveFlow(importedFlow, user);
     addLog(`Imported "${activeFlow.name}" to local library.`, "SYSTEM", "success");
   };
 
@@ -843,7 +858,9 @@ function App() {
     e.stopPropagation();
     const flowToDelete = flows.find(f => f.id === id);
     if (!flowToDelete) return;
-    if(!confirm(`Delete flow "${flowToDelete.name}"? This cannot be undone.`)) return;
+    
+    if(!(await confirmAction(`Delete flow "${flowToDelete.name}"? This cannot be undone.`, "Delete Flow"))) return;
+    
     try {
         if (flowToDelete.isPublic) {
              if(strapi.isAuthenticated()) await strapi.deletePublicFlow(flowToDelete.flowId);
@@ -1171,6 +1188,9 @@ function App() {
           <>
             <div className={`px-4 py-3 border-b ${borderPrimary} flex gap-1`}>
                 {['all', 'mine', 'public'].map((f: any) => (<button key={f} onClick={() => setFlowListFilter(f)} className={`flex-1 text-[10px] uppercase font-bold py-1 px-2 rounded border transition-colors ${flowListFilter === f ? 'bg-blue-600 text-white border-blue-500' : (isDark ? 'text-slate-500 border-slate-800' : 'text-slate-500 border-slate-200')}`}>{f}</button>))}
+                <button onClick={async () => { setIsRefreshing(true); await loadAllFlows(); setTimeout(() => setIsRefreshing(false), 500); }} className={`p-1.5 rounded border transition-colors ${isDark ? 'text-slate-400 hover:text-white border-slate-700 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 border-slate-200 hover:bg-slate-100'}`}>
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                </button>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
                 {filteredFlows.map(f => (
@@ -1182,7 +1202,7 @@ function App() {
                                 <div className={`text-[10px] uppercase ${f.ownerId === user?.id ? 'text-blue-400' : 'text-slate-500'}`}>{f.ownerId === user?.id ? 'Owner' : 'Library'}</div>
                             </div>
                         </div>
-                        {f.ownerId === user?.id && <button onClick={(e) => handleDeleteFlow(f.id, e)} className="p-1.5 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        {(f.ownerId === user?.id || !f.isPublic) && <button onClick={(e) => handleDeleteFlow(f.id, e)} className="p-1.5 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>}
                     </div>
                 ))}
                 {filteredFlows.length === 0 && (

@@ -139,7 +139,7 @@ ${logString}
     };
 
     const response = await ai.models.generateContent({
-      model: aiModel || 'gemini-2.0-flash', // Default to a smart model
+      model: aiModel || 'gemini-3-flash-preview', // Default to a smart model
       contents: userPrompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,

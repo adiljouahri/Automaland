@@ -1,6 +1,5 @@
-
 import { invoke } from '@tauri-apps/api/core';
-import { AutomationFlow } from '../types';
+import { AutomationFlow, User } from '../types';
 
 // Helper to check if running in Tauri environment
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -18,7 +17,9 @@ export class LocalStoreService {
         }
     }
 
-    static async getFlows(userId?: number): Promise<AutomationFlow[]> {
+    static async getFlows(user?: User | null): Promise<AutomationFlow[]> {
+        const userId = user?.id;
+
         // Fallback for Web Mode
         if (!isTauri()) {
             try {
@@ -56,7 +57,7 @@ export class LocalStoreService {
         }
     }
 
-    static async saveFlow(flow: AutomationFlow): Promise<void> {
+    static async saveFlow(flow: AutomationFlow, user?: User | null): Promise<void> {
         const payload = {
             ...flow,
             chatHistory: flow.chatHistory, // Tauri backend expects string, but we handle stringify there or here depending on logic. Rust expects string.
@@ -65,7 +66,7 @@ export class LocalStoreService {
 
         // Fallback for Web Mode
         if (!isTauri()) {
-            const current = await this.getFlows();
+            const current = await this.getFlows(user);
             const index = current.findIndex(f => f.flowId === flow.flowId);
             if (index >= 0) current[index] = flow;
             else current.push(flow);
@@ -87,9 +88,13 @@ export class LocalStoreService {
 
     static async deleteFlow(flowId: string): Promise<void> {
         if (!isTauri()) {
-            const current = await this.getFlows();
-            const filtered = current.filter(f => f.flowId !== flowId);
-            localStorage.setItem('local_flows_db', JSON.stringify(filtered));
+            // In web mode we can't easily filter by user without passing it, but delete usually doesn't need auth check in local mock
+            const stored = localStorage.getItem('local_flows_db');
+            if (stored) {
+                const current = JSON.parse(stored) as AutomationFlow[];
+                const filtered = current.filter(f => f.flowId !== flowId);
+                localStorage.setItem('local_flows_db', JSON.stringify(filtered));
+            }
             return;
         }
         await invoke('delete_local_flow', { flowId });

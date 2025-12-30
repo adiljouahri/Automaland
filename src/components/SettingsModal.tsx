@@ -18,7 +18,7 @@ interface SettingsModalProps {
 }
 
 const PROVIDER_MODELS: Record<AIProvider, string[]> = {
-  gemini: ['gemini-2.0-flash', 'gemini-2.0-pro-exp-02-05', 'gemini-3-pro-preview', 'gemini-1.5-pro'],
+  gemini: ['gemini-3-flash-preview', 'gemini-3-pro-preview','gemini-2.0-flash', 'gemini-2.0-pro-exp-02-05', 'gemini-1.5-pro'],
   openai: ['gpt-4o', 'gpt-4o-mini', 'o1-preview'],
   claude: ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
   custom: []
