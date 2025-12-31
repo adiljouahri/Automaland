@@ -9,7 +9,7 @@ const vm = require('vm');
 const chokidar = require('chokidar');
 const axios = require('axios');
 const archiver = require('archiver');
-const ExtendScriptFacade = require('./core/ExtendScriptFacade');
+// REMOVED STATIC IMPORT: const ExtendScriptFacade = require('./core/ExtendScriptFacade');
 
 const app = express();
 // Default start port, will increment if busy
@@ -21,7 +21,58 @@ const LOGS_DIR = path.join(USER_DATA_DIR, 'logs');
 fs.ensureDirSync(LOGS_DIR);
 const SERVER_LOG_PATH = path.join(LOGS_DIR, 'server.log');
 
-// Log Rotation / Management can be added here, for now simple append
+// --- Log Rotation & Cleanup ---
+function manageLogs() {
+    try {
+        const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1 Day Retention
+        const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB Limit for Active Log
+
+        // 1. Rotate Active Log if too big or too old (creation time)
+        if (fs.existsSync(SERVER_LOG_PATH)) {
+            const stats = fs.statSync(SERVER_LOG_PATH);
+            const age = Date.now() - stats.birthtimeMs;
+            
+            // Only rotate if file has content
+            if (stats.size > 0) {
+                 if (stats.size > MAX_SIZE_BYTES || age > MAX_AGE_MS) {
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    const archivePath = path.join(LOGS_DIR, `server-archive-${timestamp}.log`);
+                    fs.renameSync(SERVER_LOG_PATH, archivePath);
+                    // Note: We use process.stdout to avoid recursion
+                    try { process.stdout.write(`[LogManager] Rotated server.log to ${archivePath}\n`); } catch(e){}
+                 }
+            }
+        }
+
+        // 2. Clean Old Archives
+        const files = fs.readdirSync(LOGS_DIR);
+        const now = Date.now();
+        
+        files.forEach(file => {
+            // Filter for log files
+            if (!file.endsWith('.log')) return;
+            if (file === 'server.log') return; // Skip active
+
+            const filePath = path.join(LOGS_DIR, file);
+            try {
+                const stats = fs.statSync(filePath);
+                if (now - stats.mtimeMs > MAX_AGE_MS) {
+                    fs.unlinkSync(filePath);
+                    try { process.stdout.write(`[LogManager] Pruned old log: ${file}\n`); } catch(e){}
+                }
+            } catch(e) {}
+        });
+    } catch (e) {
+        try { process.stdout.write(`[LogManager] Error: ${e.message}\n`); } catch(err){}
+    }
+}
+
+// Run maintenance on startup
+manageLogs();
+// Run maintenance every hour
+setInterval(manageLogs, 60 * 60 * 1000);
+
+
 function writeToDisk(type, ...args) {
     try {
         const msg = args.map(arg => 
@@ -33,8 +84,7 @@ function writeToDisk(type, ...args) {
         
         fs.appendFileSync(SERVER_LOG_PATH, logLine, 'utf8');
     } catch (e) {
-        // Fallback to std err if disk write fails
-        process.stdout.write("Logging failed: " + e.message + "\n");
+        // Silent fail if disk write fails to avoid crash loops
     }
 }
 
@@ -56,7 +106,11 @@ function broadcastLog(type, message) {
     });
     
     logClients.forEach(client => {
-        client.write(`data: ${payload}\n\n`);
+        try {
+            client.write(`data: ${payload}\n\n`);
+        } catch(e) {
+            // Client likely disconnected
+        }
     });
 }
 
@@ -65,64 +119,141 @@ const originalError = console.error;
 
 console.log = (...args) => {
     writeToDisk('INFO', ...args);
-    // Original log goes to stdout, which Tauri captures for its own debugging/logs if running in shell
-    originalLog.apply(console, args); 
+    // Original log goes to stdout. Wrap in try-catch to prevent EPIPE crashes if parent process closes pipe.
+    try {
+        originalLog.apply(console, args); 
+    } catch (e) {
+        if (e.code !== 'EPIPE') {
+            writeToDisk('SYS_ERR', 'Stdout write failed:', e.message);
+        }
+    }
     
     // Broadcast for UI
-    const msg = args.map(arg => 
-        typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-    ).join(' ');
-    broadcastLog('INFO', msg);        
+    try {
+        const msg = args.map(arg => 
+            typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+        ).join(' ');
+        broadcastLog('INFO', msg);        
+    } catch(e) {}
 };
 
 console.error = (...args) => {
     writeToDisk('ERROR', ...args);
-    originalError.apply(console, args);
     
-    const msg = args.map(arg => 
-        typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-    ).join(' ');
-    broadcastLog('ERROR', msg);
+    try {
+        originalError.apply(console, args);
+    } catch (e) {
+        if (e.code !== 'EPIPE') {
+            writeToDisk('SYS_ERR', 'Stderr write failed:', e.message);
+        }
+    }
+    
+    try {
+        const msg = args.map(arg => 
+            typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+        ).join(' ');
+        broadcastLog('ERROR', msg);
+    } catch(e) {}
 };
 
 // Catch unhandled rejections/exceptions to log them before crash
 process.on('uncaughtException', (err) => {
-    console.error('UNCAUGHT EXCEPTION:', err);
-    writeToDisk('FATAL', err.stack || err);
+    // Prevent recursion: If the error is EPIPE, it likely came from console.log/error failing
+    if (err.code === 'EPIPE') return;
+
+    writeToDisk('FATAL', 'UNCAUGHT EXCEPTION:', err.stack || err);
+    
+    // Try to print to stderr one last time, safely
+    try {
+        originalError.call(console, 'UNCAUGHT EXCEPTION:', err);
+    } catch(e) {}
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('UNHANDLED REJECTION:', reason);
+    if (reason && reason.code === 'EPIPE') return;
+
     writeToDisk('FATAL', 'Unhandled Rejection at:', promise, 'reason:', reason);
+    try {
+        originalError.call(console, 'UNHANDLED REJECTION:', reason);
+    } catch(e) {}
 });
 
 
 // --- Initialization ---
 const GLOBAL_STATE = {};
 const libPath = path.join(__dirname, 'lib');
-const hostBridge = new ExtendScriptFacade(libPath);
 
-// --- Bridge Message Listener for Logging ---
-hostBridge.on('message', (event) => {
-    // Capture $.writeln output from ExtendScript
-    if (event.message && event.message.body) {
-        let msg = event.message.body;
-        // Basic cleanup if it's wrapped in XML CDATA
-        if (msg.includes("<![CDATA[")) {
-            const match = msg.match(/<!\[CDATA\[(.*?)\]\]>/s);
-            if (match) msg = match[1];
-        }
-        
-        // Log to disk specifically as HOST
-        writeToDisk('HOST', msg);
-        
-        // Broadcast to UI
-        broadcastLog('HOST', msg);
-    }
-});
-
+// Dynamic Bridge State
+let hostBridge = null;
 let bridgeReady = false;
 let installedApps = [];
+
+// Helper to Bootstrap the Bridge from Frontend Source Code
+async function ensureBridge(adapterCode) {
+    if (hostBridge) return hostBridge;
+    if (!adapterCode) {
+        console.warn("[Sidecar] No adapter code provided. Cannot initialize bridge.");
+        return null;
+    }
+    
+    try {
+        console.log("[Sidecar] Compiling Adapter Code...");
+        const sandbox = {
+            require: require,
+            console: console,
+            process: process,
+            Buffer: Buffer,
+            setTimeout, clearTimeout, setInterval, clearInterval,
+            __dirname: __dirname,
+            module: { exports: {} },
+            exports: {}
+        };
+        sandbox.exports = sandbox.module.exports;
+        
+        const context = vm.createContext(sandbox);
+        vm.runInContext(adapterCode, context);
+        
+        const FacadeClass = sandbox.module.exports;
+        
+        console.log(`[Sidecar] Initializing Host Bridge with Lib Path: ${libPath}`);
+        hostBridge = new FacadeClass(libPath);
+        
+        // Setup Listener
+        hostBridge.on('message', (event) => {
+            // Capture $.writeln output from ExtendScript
+            if (event.message && event.message.body) {
+                let msg = event.message.body;
+                // Basic cleanup if it's wrapped in XML CDATA
+                if (msg.includes("<![CDATA[")) {
+                    const match = msg.match(/<!\[CDATA\[(.*?)\]\]>/s);
+                    if (match) msg = match[1];
+                }
+                
+                // Log to disk specifically as HOST
+                writeToDisk('HOST', msg);
+                
+                // Broadcast to UI
+                broadcastLog('HOST', msg);
+            }
+        });
+
+        const success = await hostBridge.initialize("tripanel-sidecar");
+        if (success === true) {
+            bridgeReady = true;
+            installedApps = hostBridge.getInstalledApps();
+            console.log("[Sidecar] Host Bridge Ready.");
+        } else {
+            console.warn("[Sidecar] Host Bridge did not initialize (Simulation Mode).");
+            bridgeReady = false;
+        }
+
+        return hostBridge;
+    } catch (e) {
+        console.error("Bridge Init Failed:", e);
+        return null;
+    }
+}
+
 
 // --- Setup User Standard Library ---
 const USER_LIB_DIR = path.join(USER_DATA_DIR, 'lib');
@@ -301,27 +432,6 @@ function __tripanel_wrap__(userFunc) {
 `;
 fs.writeFileSync(LIB_CORE, CORE_CONTENT, 'utf8');
 
-// Initialize Bridge
-(async () => {
-    try {
-        console.log("[Sidecar] Initializing Host Bridge...");
-        console.log(`[Sidecar] Lib Path: ${libPath}`);
-        
-        const success = await hostBridge.initialize("tripanel-sidecar");
-        if (success === true) {
-            bridgeReady = true;
-            installedApps = hostBridge.getInstalledApps();
-            console.log("[Sidecar] Host Bridge Ready.");
-        } else {
-            console.warn("[Sidecar] Host Bridge did not initialize (Simulation Mode).");
-            bridgeReady = false;
-        }
-    } catch (e) {
-        console.warn("[Sidecar] Host Bridge failed to initialize (Simulation Mode).", e.message);
-        bridgeReady = false;
-    }
-})();
-
 app.use(cors());
 app.use(bodyParser.json({ limit: '100mb' }));
 
@@ -429,22 +539,27 @@ __tripanel_wrap__(function() {
             }
 
             try {
-                const resultRaw = await hostBridge.evaluate(appToUse, finalJsx, "main", timeout, true);
-                
-                // When receiving data BACK from ExtendScript, we expect valid JSON 
-                // because __tripanel_wrap__ uses JSON.stringify.
-                let jsonResult;
-                try {
-                    jsonResult = JSON.parse(resultRaw);
-                } catch (parseErr) {
-                    console.error("Failed to parse app response:", resultRaw);
-                    throw new Error(`Invalid JSON returned from app: ${resultRaw}`);
-                }
-
-                if (jsonResult.success) {
-                    return jsonResult.data;
+                // Ensure bridge is ready. (Normally handled by ensureBridge on request)
+                if (hostBridge) {
+                    const resultRaw = await hostBridge.evaluate(appToUse, finalJsx, "main", timeout, true);
+                    
+                    // When receiving data BACK from ExtendScript, we expect valid JSON 
+                    // because __tripanel_wrap__ uses JSON.stringify.
+                    let jsonResult;
+                    try {
+                        jsonResult = JSON.parse(resultRaw);
+                    } catch (parseErr) {
+                        console.error("Failed to parse app response:", resultRaw);
+                        throw new Error(`Invalid JSON returned from app: ${resultRaw}`);
+                    }
+    
+                    if (jsonResult.success) {
+                        return jsonResult.data;
+                    } else {
+                        throw new Error(`Script Error: ${jsonResult.data}`);
+                    }
                 } else {
-                    throw new Error(`Script Error: ${jsonResult.data}`);
+                     throw new Error("Bridge not initialized.");
                 }
             } catch (e) {
                 throw new Error(`Bridge Error: ${e.message}`);
@@ -594,7 +709,7 @@ app.get('/api/auth/callback', async (req, res) => {
     // --- 5. Validation ---
     if (!jwt) {
         console.warn("[Auth] No JWT resolved.");
-        authState = { status: 'error', error: "Login Incomplete: No valid JWT found.", data: null, timestamp: Date.now() };
+        authState = { status: 'error', error: "Login Incomplete: No valid session token found.", data: null, timestamp: Date.now() };
         return res.status(400).send(`
             <html><body style="font-family:sans-serif;text-align:center;padding:50px;">
                 <h1 style="color:orange">Login Incomplete</h1>
@@ -697,7 +812,13 @@ app.get('/api/adobe/apps', async (req, res) => {
 
 app.post('/api/execute/node', async (req, res) => {
     try {
-        const { code, triggerData, envVars, entryPoint, targetApp, timeout, appCode } = req.body;
+        const { code, triggerData, envVars, entryPoint, targetApp, timeout, appCode, adapterCode } = req.body;
+        
+        // 1. Initialize Bridge if needed using provided adapter code
+        if (!hostBridge && adapterCode) {
+             await ensureBridge(adapterCode);
+        }
+
         const execTimeout = timeout ? parseInt(timeout) * 1000 : 10000;
         
         const result = await runNodeCode({
@@ -716,8 +837,13 @@ app.post('/api/execute/node', async (req, res) => {
     }
 });
 
-app.post('/api/watchers/sync', (req, res) => {
-    const { configs, envVars } = req.body; 
+app.post('/api/watchers/sync', async (req, res) => {
+    const { configs, envVars, adapterCode } = req.body; 
+
+    // Initialize bridge for watchers if not ready
+    if (!hostBridge && adapterCode) {
+        await ensureBridge(adapterCode);
+    }
 
     const incomingIds = configs.map(c => c.id);
 

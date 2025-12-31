@@ -97,6 +97,7 @@ export class StrapiService {
       });
       if (!res.ok) return [];
       const json = await res.json();
+      console.log('json',json)
 
       return (json.data || []).map((item: any) => {
         let id = item.id;
@@ -120,7 +121,10 @@ export class StrapiService {
         const uPermUser = attrs.users_permissions_user?.data || attrs.users_permissions_user;
         const simpleUser = attrs.user?.data || attrs.user;
         const userObj = uPermUser || simpleUser;
-        if (userObj) ownerId = typeof userObj === 'object' ? userObj.id : userObj;
+        if (userObj) {
+            const rawId = typeof userObj === 'object' ? userObj.id : userObj;
+            ownerId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
+        }
 
         return {
           id: `public-${id}`, 
@@ -167,7 +171,8 @@ export class StrapiService {
         targetApp: flow.targetApp,
         chatHistory: JSON.stringify(flow.chatHistory),
         flowId: flow.flowId,
-        isPublic: true
+        isPublic: true,
+        user:user.id
       }
     };
 

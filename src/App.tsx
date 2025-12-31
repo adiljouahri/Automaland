@@ -12,6 +12,7 @@ import { StrapiService } from './services/strapi';
 import { LocalStoreService } from './services/local';
 import { AutomationFlow, LogEntry, ChatMessage, AppStatus, AppSettings, EnvVariable, WatcherConfig, NpmPackage, HostAppConfig, User, FlowVersion } from './types';
 import { INITIAL_UI_SCHEMA, INITIAL_NODE_CODE, INITIAL_APP_CODE } from './constants';
+import { ADAPTER_CODE } from './adapter';
 
 function App() {
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -179,7 +180,8 @@ function App() {
       }
   }, [activeFlow?.id]);
 
-  const isOwner = activeFlow ? (activeFlow.ownerId === user?.id || !activeFlow.ownerId || !activeFlow.isPublic) : false;
+  // Use loose equality for owner check to handle potential string/number mismatches from API
+  const isOwner = activeFlow ? (activeFlow.ownerId == user?.id || !activeFlow.ownerId || !activeFlow.isPublic) : false;
   
   const [sidebarTab, setSidebarTab] = useState<'chat' | 'flows'>('chat');
   const [flowListFilter, setFlowListFilter] = useState<'all' | 'mine' | 'public'>('all');
@@ -384,14 +386,16 @@ function App() {
      return () => clearInterval(interval);
   }, [isPollingAuth, settings.serverUrl, settings.strapiUrl, strapi, addLog]);
 
-
-  const loadAllFlows = async () => {
+  // Use callback to ensure loadAllFlows doesn't cause infinite re-renders if added to dependencies, 
+  // but can still be called safely.
+  const loadAllFlows = useCallback(async () => {
     // Pass user object to LocalStoreService
     const localFlows = await LocalStoreService.getFlows(user);
     let publicFlows: AutomationFlow[] = [];
     if (strapi.isAuthenticated() && user) {
         // Pass user object to StrapiService
         publicFlows = await strapi.getPublicFlows(user);
+        console.log('publicFlows',publicFlows)
     }
 
     setFlows(prev => {
@@ -430,11 +434,11 @@ function App() {
         }
         return merged;
     });
-  };
+  }, [user, strapi]);
 
   useEffect(() => {
     loadAllFlows();
-  }, [user]);
+  }, [loadAllFlows]); // Safe dependency as loadAllFlows is memoized
 
   useEffect(() => {
     if (isEditingName && nameInputRef.current) {
@@ -611,7 +615,9 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           configs,
-          envVars: envVars.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {})
+          envVars: envVars.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {}),
+          // IMPORTANT: Watchers need adapter code too if they trigger flows
+          adapterCode: ADAPTER_CODE
         })
       }).catch(() => {});
     }
@@ -959,7 +965,8 @@ function App() {
            entryPoint, 
            targetApp: targetFlow.targetApp,
            timeout: targetFlow.executionTimeout || 10,
-           appCode: targetFlow.appCode 
+           appCode: targetFlow.appCode,
+           adapterCode: ADAPTER_CODE
        };
        const res = await safeServerRequest('/api/execute/node', { 
            method: 'POST', 
@@ -1199,10 +1206,12 @@ function App() {
                             {f.isPublic ? <Globe className="w-4 h-4 text-green-500" /> : <Lock className="w-4 h-4 text-slate-500" />}
                             <div>
                                 <div className="font-medium text-sm truncate w-40">{f.name}</div>
-                                <div className={`text-[10px] uppercase ${f.ownerId === user?.id ? 'text-blue-400' : 'text-slate-500'}`}>{f.ownerId === user?.id ? 'Owner' : 'Library'}</div>
+                                {/* Use loose equality for owner check */}
+                                <div className={`text-[10px] uppercase ${f.ownerId == user?.id ? 'text-blue-400' : 'text-slate-500'}`}>{f.ownerId == user?.id ? 'Owner' : 'Library'}</div>
                             </div>
                         </div>
-                        {(f.ownerId === user?.id || !f.isPublic) && <button onClick={(e) => handleDeleteFlow(f.id, e)} className="p-1.5 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        {/* Use loose equality for owner check */}
+                        {(f.ownerId == user?.id || !f.isPublic) && <button onClick={(e) => handleDeleteFlow(f.id, e)} className="p-1.5 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>}
                     </div>
                 ))}
                 {filteredFlows.length === 0 && (
