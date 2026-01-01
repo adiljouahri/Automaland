@@ -36,6 +36,16 @@ export interface AutomationFlow {
   savedFormData?: Record<string, any>; // Persisted UI values
 }
 
+export interface Report {
+  id: number;
+  flowId: string;
+  reason: string;
+  description: string;
+  reportStatus: 'pending' | 'investigating' | 'resolved' | 'dismissed';
+  adminFeedback?: string;
+  createdAt: string;
+}
+
 export interface User {
   id: number;
   username: string;

@@ -64,47 +64,196 @@ Return a JSON object with:
 - \`simulatedLogs\`: Array of 5 strings showing a successful run.
 `;
 
-export const generateAutomationFlow = async (
-  prompt: string, 
-  settings: AppSettings,
-  currentFlow?: AutomationFlow,
-  contextLogs?: LogEntry[]
-): Promise<Partial<AutomationFlow> & { explanation?: string }> => {
-  
+const SECURITY_INSTRUCTION = `
+You are a Cyber Security Auditor specializing in Node.js and Adobe ExtendScript automation.
+Your job is to analyze the provided code for security risks, malware indicators, and logic errors.
+
+### RISKS TO LOOK FOR:
+1. **Malicious Obfuscation**: Base64 encoded strings, eval() usage, packed code.
+2. **File System Abuse**: Unrestricted deletion (rm -rf /), writing to system directories outside the intended workflow.
+3. **Network Exfiltration**: Sending data to unknown/suspicious IP addresses or domains.
+4. **Infinite Loops**: Logic that freezes the application.
+5. **Logic Errors**: Missing returns, improper async/await usage.
+
+### RESPONSE FORMAT
+Return a JSON object with:
+- \`status\`: 'SAFE', 'WARNING', or 'DANGER'.
+- \`score\`: 0 to 100 (100 is perfectly safe).
+- \`analysis\`: A detailed markdown explanation of findings.
+- \`recommendation\`: Short advice on whether to run this code.
+`;
+
+export const verifyAutomationFlow = async (
+  flow: AutomationFlow,
+  settings: AppSettings
+): Promise<{ status: 'SAFE' | 'WARNING' | 'DANGER', score: number, analysis: string, recommendation: string }> => {
   const { aiApiKey, aiProvider, aiModel, aiBaseUrl } = settings;
 
   if (!aiApiKey) {
-    throw new Error("Missing API Key in settings. Please go to Settings and enter your key.");
+    throw new Error("Missing API Key. Please configure it in Settings.");
+  }
+
+  const userPrompt = `
+  Please analyze this automation flow for security risks.
+
+  **Node.js Code:**
+  \`\`\`javascript
+  ${flow.nodeCode}
+  \`\`\`
+
+  **Host App Code (ExtendScript):**
+  \`\`\`javascript
+  ${flow.appCode}
+  \`\`\`
+  `;
+
+  if (aiProvider === 'gemini') {
+    const ai = new GoogleGenAI({ apiKey: aiApiKey });
+    const responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          status: { type: Type.STRING, enum: ["SAFE", "WARNING", "DANGER"] },
+          score: { type: Type.NUMBER },
+          analysis: { type: Type.STRING },
+          recommendation: { type: Type.STRING }
+        },
+        required: ["status", "score", "analysis", "recommendation"]
+    };
+
+    const response = await ai.models.generateContent({
+        model: aiModel || 'gemini-2.0-flash',
+        contents: userPrompt,
+        config: {
+            systemInstruction: SECURITY_INSTRUCTION,
+            responseMimeType: "application/json",
+            responseSchema: responseSchema,
+        }
+    });
+
+    const text = response.text;
+    if (!text) throw new Error("No response from AI Auditor");
+    return JSON.parse(text);
+  }
+
+  // Fallback for OpenAI/Claude
+  let url = '';
+  let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let body: any = {};
+
+  if (aiProvider === 'openai' || aiProvider === 'custom') {
+    url = aiBaseUrl || 'https://api.openai.com/v1/chat/completions';
+    headers['Authorization'] = `Bearer ${aiApiKey}`;
+    body = {
+      model: aiModel,
+      messages: [
+        { role: 'system', content: SECURITY_INSTRUCTION + "\nReturn ONLY valid JSON." },
+        { role: 'user', content: userPrompt }
+      ],
+      response_format: { type: 'json_object' }
+    };
+  } else if (aiProvider === 'claude') {
+    url = 'https://api.anthropic.com/v1/messages';
+    headers['x-api-key'] = aiApiKey;
+    headers['anthropic-version'] = '2023-06-01';
+    body = {
+      model: aiModel,
+      system: SECURITY_INSTRUCTION,
+      messages: [{ role: 'user', content: userPrompt }],
+      max_tokens: 2048
+    };
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    throw new Error("AI Verification Failed");
+  }
+
+  const json = await res.json();
+  let content = '';
+
+  if (aiProvider === 'openai' || aiProvider === 'custom') {
+    content = json.choices[0].message.content;
+  } else if (aiProvider === 'claude') {
+    content = json.content[0].text;
+  }
+
+  return JSON.parse(content);
+};
+
+export const generateAutomationFlow = async (
+  prompt: string, 
+  modelNameOrSettings: string | AppSettings,
+  apiKeyOrFlow?: string | AutomationFlow,
+  currentFlowOrLogs?: AutomationFlow | LogEntry[] | undefined,
+  settingsOrLogs?: AppSettings | LogEntry[] | undefined,
+  contextLogs?: LogEntry[]
+): Promise<Partial<AutomationFlow> & { explanation?: string }> => {
+  
+  // Handle polymorphic arguments
+  let aiSettings: AppSettings;
+  let flowContext: AutomationFlow | undefined;
+  let logsContext: LogEntry[] | undefined = undefined;
+  
+  if (typeof modelNameOrSettings === 'object') {
+      aiSettings = modelNameOrSettings as AppSettings;
+      flowContext = apiKeyOrFlow as AutomationFlow | undefined;
+      
+      // Determine where logs are passed (App.tsx sends them as 5th argument, undefined as 4th)
+      if (Array.isArray(settingsOrLogs)) {
+          logsContext = settingsOrLogs as LogEntry[];
+      } else if (Array.isArray(currentFlowOrLogs)) {
+          logsContext = currentFlowOrLogs as LogEntry[];
+      }
+  } else {
+      // Legacy call support
+      aiSettings = {
+          aiApiKey: apiKeyOrFlow as string,
+          aiModel: modelNameOrSettings as string,
+          aiProvider: 'gemini',
+          serverUrl: '', strapiUrl: '', theme: 'dark'
+      };
+      flowContext = currentFlowOrLogs as AutomationFlow | undefined;
+      logsContext = contextLogs;
+  }
+
+  const { aiApiKey, aiProvider, aiModel, aiBaseUrl } = aiSettings;
+
+  if (!aiApiKey) {
+    throw new Error("Missing API Key");
   }
 
   // Construct Context Block
   let contextBlock = "";
-  if (currentFlow) {
+  if (flowContext) {
       contextBlock = `
 ### CURRENT FLOW CONTEXT
-**Target App:** ${currentFlow.targetApp}
+**Target App:** ${flowContext.targetApp}
 
 **1. Node.js Code (Current):**
 \`\`\`javascript
-${currentFlow.nodeCode}
+${flowContext.nodeCode}
 \`\`\`
 
 **2. Host App Code (Current):**
 \`\`\`javascript
-${currentFlow.appCode}
+${flowContext.appCode}
 \`\`\`
 
 **3. UI Schema (Current):**
 \`\`\`json
-${currentFlow.uiSchema}
+${flowContext.uiSchema}
 \`\`\`
 `;
   }
 
   // Add Log Context if available
-  if (contextLogs && contextLogs.length > 0) {
-      // Filter for recent logs, prioritizing errors, max 20 entries
-      const recentLogs = contextLogs.slice(-20);
+  if (logsContext && logsContext.length > 0) {
+      const recentLogs = logsContext.slice(-20);
       const logString = recentLogs.map(l => `[${l.timestamp}] [${l.source}] ${l.type.toUpperCase()}: ${l.message}`).join('\n');
       contextBlock += `
 ### RECENT EXECUTION LOGS
@@ -115,15 +264,12 @@ ${logString}
 `;
   }
 
-  const userPrompt = currentFlow 
+  const userPrompt = flowContext 
     ? `Request: "${prompt}".\n\n${contextBlock}\n\nBased on the Request and the Context above, update the flow. Fix any errors seen in the logs. Ensure code is properly formatted with newlines. Remember to use 'return' in $.run_jsx calls.`
     : `Create a new automation flow for: "${prompt}". Ensure code is properly formatted with newlines. Remember to use 'return' in $.run_jsx calls.`;
 
   if (aiProvider === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: aiApiKey });
-    
-    // Note: We use Type.STRING for uiSchema, but sometimes models return objects.
-    // We handle this in the return block below.
     const responseSchema = {
       type: Type.OBJECT,
       properties: {
@@ -139,7 +285,7 @@ ${logString}
     };
 
     const response = await ai.models.generateContent({
-      model: aiModel || 'gemini-3-flash-preview', // Default to a smart model
+      model: aiModel || 'gemini-2.0-flash', 
       contents: userPrompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -152,24 +298,13 @@ ${logString}
     if (!text) throw new Error("No response from AI");
     
     const parsed = JSON.parse(text);
-
-    // SANITIZATION: Ensure uiSchema is a string
     if (typeof parsed.uiSchema === 'object') {
         parsed.uiSchema = JSON.stringify(parsed.uiSchema, null, 2);
     }
-    
-    // Force newlines if they were escaped incorrectly by the model (rare but happens)
-    if (parsed.nodeCode && !parsed.nodeCode.includes('\n')) {
-        parsed.nodeCode = parsed.nodeCode.replace(/\\n/g, '\n').replace(/;/g, ';\n');
-    }
-    if (parsed.appCode && !parsed.appCode.includes('\n')) {
-        parsed.appCode = parsed.appCode.replace(/\\n/g, '\n').replace(/;/g, ';\n');
-    }
-
     return parsed;
   }
 
-  // --- FALLBACK FOR OTHER PROVIDERS (OpenAI / Claude) ---
+  // Fallback for OpenAI/Claude
   let url = '';
   let headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let body: any = {};
@@ -218,7 +353,6 @@ ${logString}
   }
 
   const parsedContent = JSON.parse(content);
-  // SANITIZATION
   if (typeof parsedContent.uiSchema === 'object') {
       parsedContent.uiSchema = JSON.stringify(parsedContent.uiSchema, null, 2);
   }

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key, CheckSquare, Square } from 'lucide-react';
+import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key, CheckSquare, Square, ShieldCheck, Flag } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core'; // Import invoke from Tauri
 import { save, ask } from '@tauri-apps/plugin-dialog';
 import { open } from '@tauri-apps/plugin-shell';
@@ -7,7 +7,8 @@ import { CodeEditor } from './components/CodeEditor';
 import { FormRenderer } from './components/FormRenderer';
 import { LogConsole } from './components/LogConsole';
 import { SettingsModal } from './components/SettingsModal';
-import { generateAutomationFlow } from './services/ai';
+import { ReportModal } from './components/ReportModal';
+import { generateAutomationFlow, verifyAutomationFlow } from './services/ai';
 import { StrapiService } from './services/strapi';
 import { LocalStoreService } from './services/local';
 import { AutomationFlow, LogEntry, ChatMessage, AppStatus, AppSettings, EnvVariable, WatcherConfig, NpmPackage, HostAppConfig, User, FlowVersion } from './types';
@@ -114,6 +115,7 @@ function App() {
   const [packages, setPackages] = useState<NpmPackage[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false); // New state for report modal
   const [availableApps, setAvailableApps] = useState<HostAppConfig[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -198,6 +200,7 @@ function App() {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
   const isSavingRef = useRef(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const isDark = settings.theme === 'dark';
 
@@ -395,7 +398,6 @@ function App() {
     if (strapi.isAuthenticated() && user) {
         // Pass user object to StrapiService
         publicFlows = await strapi.getPublicFlows(user);
-        console.log('publicFlows',publicFlows)
     }
 
     setFlows(prev => {
@@ -885,6 +887,73 @@ function App() {
     }
   };
 
+  const handleVerifyFlow = async () => {
+      if (!activeFlow) return;
+      setIsVerifying(true);
+      
+      const userMsg: ChatMessage = { 
+          id: Date.now().toString(), 
+          role: 'user', 
+          text: 'Requesting Security Verification...', 
+          timestamp: new Date() 
+      };
+      updateActiveFlow({ chatHistory: [...activeFlow.chatHistory, userMsg] });
+
+      try {
+          const result = await verifyAutomationFlow(activeFlow, settings);
+          
+          let resultColor = 'text-green-500';
+          if (result.status === 'WARNING') resultColor = 'text-amber-500';
+          if (result.status === 'DANGER') resultColor = 'text-red-500';
+
+          const reportText = `### Security Analysis Report
+**Status:** ${result.status} (Score: ${result.score}/100)
+${result.recommendation}
+
+**Details:**
+${result.analysis}
+`;
+          const aiMsg: ChatMessage = {
+              id: (Date.now() + 1).toString(),
+              role: 'model',
+              text: reportText,
+              timestamp: new Date()
+          };
+          updateActiveFlow({ chatHistory: [...activeFlow.chatHistory, userMsg, aiMsg] });
+          addLog(`Verification Complete: ${result.status}`, "SYSTEM", result.status === 'DANGER' ? 'error' : 'info');
+      } catch (e: any) {
+          const errMsg: ChatMessage = {
+              id: (Date.now() + 1).toString(),
+              role: 'model',
+              text: `Verification Failed: ${e.message}`,
+              timestamp: new Date()
+          };
+          updateActiveFlow({ chatHistory: [...activeFlow.chatHistory, userMsg, errMsg] });
+      } finally {
+          setIsVerifying(false);
+          setSidebarTab('chat');
+          if(chatEndRef.current) chatEndRef.current.scrollIntoView({behavior: 'smooth'});
+      }
+  };
+
+  const handleReportFlowClick = () => {
+      if (!activeFlow) return;
+      setIsReportModalOpen(true);
+  };
+
+  const handleSubmitReport = async (reason: string, description: string) => {
+      if (!activeFlow) return;
+      try {
+          // Changed: Pass user?.id to link report to current user
+          await strapi.submitReport(activeFlow.flowId, reason, description, user?.id);
+          addLog(`Report submitted for flow ${activeFlow.name}`, "SYSTEM", "success");
+          alert("Thank you. Your report has been submitted.");
+      } catch (e: any) {
+          alert(`Failed to submit report: ${e.message}`);
+          addLog(`Report failed: ${e.message}`, "SYSTEM", "error");
+      }
+  };
+
   const handleSendMessage = async () => {
     if (!activeFlow) return;
     if (trialStatus.isExpired) {
@@ -903,11 +972,11 @@ function App() {
     setChatInput('');
     setStatus(AppStatus.GENERATING);
     try {
-      // Pass includeContext to decide whether to send flow context and logs
       const result = await generateAutomationFlow(
           newUserMsg.text, 
           settings, 
           includeContext ? activeFlow : undefined,
+          undefined,
           includeContext ? logs : undefined
       ) as any;
       
@@ -921,6 +990,8 @@ function App() {
     } finally { setStatus(AppStatus.IDLE); }
   };
 
+  // ... (rest of the file is unchanged, but included for completeness)
+  
   const handleInjectSnippet = (type: 'file_browser' | 'folder_browser') => {
     if (!activeFlow) return;
     const timestamp = Date.now().toString().slice(-4);
@@ -1104,15 +1175,24 @@ function App() {
            
            <button onClick={() => setShowSettings(true)} className="absolute top-4 right-4 p-2 text-slate-500 hover:bg-slate-200/20 rounded"><Settings className="w-5 h-5" /></button>
         </div>
-        <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} settings={settings} onSaveSettings={setSettings} envVars={envVars} setEnvVars={setEnvVars} watchers={watchers} setWatchers={setWatchers} packages={packages} setPackages={setPackages} availableFlows={flows} />
+        <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} settings={settings} onSaveSettings={setSettings} envVars={envVars} setEnvVars={setEnvVars} watchers={watchers} setWatchers={setWatchers} packages={packages} setPackages={setPackages} availableFlows={flows} strapi={strapi} user={user} />
       </div>
     );
   }
   
   return (
     <div className={`flex h-screen overflow-hidden ${bgMain} ${textPrimary} font-sans transition-colors duration-300`}>
-      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} settings={settings} onSaveSettings={setSettings} envVars={envVars} setEnvVars={setEnvVars} watchers={watchers} setWatchers={setWatchers} packages={packages} setPackages={setPackages} availableFlows={flows.filter(f => f.ownerId === user?.id || !f.ownerId)} />
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} settings={settings} onSaveSettings={setSettings} envVars={envVars} setEnvVars={setEnvVars} watchers={watchers} setWatchers={setWatchers} packages={packages} setPackages={setPackages} availableFlows={flows.filter(f => f.ownerId === user?.id || !f.ownerId)} strapi={strapi} user={user} />
       
+      {/* NEW: Report Modal */}
+      <ReportModal 
+        isOpen={isReportModalOpen} 
+        onClose={() => setIsReportModalOpen(false)} 
+        onSubmit={handleSubmitReport}
+        flowName={activeFlow?.name || 'Unknown Flow'}
+        theme={settings.theme}
+      />
+
       {/* HIDDEN FILE INPUT FOR IMPORT */}
       <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleImportJSON} />
 
@@ -1164,7 +1244,7 @@ function App() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     {activeFlow.chatHistory.map(msg => (
                         <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                            <div className={`p-3 rounded-lg text-sm shadow-md max-w-[95%] ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : (isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-700 border border-slate-200 shadow-sm') + ' rounded-bl-none border'}`}>
+                            <div className={`p-3 rounded-lg text-sm shadow-md max-w-[95%] whitespace-pre-wrap ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : (isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-700 border border-slate-200 shadow-sm') + ' rounded-bl-none border'}`}>
                                 {msg.text}
                             </div>
                         </div>
@@ -1293,7 +1373,24 @@ function App() {
                 <button onClick={() => fileInputRef.current?.click()} title="Import Flow from JSON" className={`p-1.5 rounded transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-200'}`}>
                     <Import className="w-4 h-4" />
                 </button>
+                {activeFlow && activeFlow.isPublic && !isOwner && (
+                    <button onClick={handleReportFlowClick} title="Report Issue / Feedback" className={`p-1.5 rounded transition-colors text-red-400 hover:bg-red-500/20 hover:text-red-500`}>
+                        <Flag className="w-4 h-4" />
+                    </button>
+                )}
             </div>
+
+            {activeFlow && (
+                <button 
+                    onClick={handleVerifyFlow} 
+                    disabled={isVerifying}
+                    title="AI Security Verification" 
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border transition-colors ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-300'} ${isVerifying ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    {isVerifying ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" /> : <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />} 
+                    Verify
+                </button>
+            )}
 
             {activeFlow && !activeFlow.isPublic ? (
                  isOwner && (
