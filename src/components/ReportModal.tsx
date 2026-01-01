@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, MessageSquareWarning, Send } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, MessageSquareWarning, Send, CreditCard } from 'lucide-react';
 
 interface ReportModalProps {
   isOpen: boolean;
@@ -7,12 +7,25 @@ interface ReportModalProps {
   onSubmit: (reason: string, description: string) => Promise<void>;
   flowName: string;
   theme: 'dark' | 'light';
+  initialReason?: string; // Allow pre-selecting Upgrade Request
 }
 
-export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, onSubmit, flowName, theme }) => {
+export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, onSubmit, flowName, theme, initialReason }) => {
   const [reason, setReason] = useState('Bug');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+      if (isOpen && initialReason) {
+          setReason(initialReason);
+          if (initialReason === 'Upgrade Request') {
+              setDescription("I would like to upgrade to the Pro plan to unlock unlimited flows and features.");
+          }
+      } else if (isOpen) {
+          setReason('Bug');
+          setDescription('');
+      }
+  }, [isOpen, initialReason]);
 
   if (!isOpen) return null;
 
@@ -47,12 +60,12 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, onSub
         {/* Header */}
         <div className={`px-6 py-4 border-b flex items-center justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-100 bg-slate-50'}`}>
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${isDark ? 'bg-amber-900/30 text-amber-500' : 'bg-amber-100 text-amber-600'}`}>
-                <MessageSquareWarning className="w-5 h-5" />
+            <div className={`p-2 rounded-lg ${reason === 'Upgrade Request' ? (isDark ? 'bg-purple-900/30 text-purple-500' : 'bg-purple-100 text-purple-600') : (isDark ? 'bg-amber-900/30 text-amber-500' : 'bg-amber-100 text-amber-600')}`}>
+                {reason === 'Upgrade Request' ? <CreditCard className="w-5 h-5" /> : <MessageSquareWarning className="w-5 h-5" />}
             </div>
             <div>
-                <h3 className={`font-bold text-sm ${textPrimary}`}>Report Issue / Feedback</h3>
-                <p className={`text-xs ${textSecondary}`}>Flow: {flowName}</p>
+                <h3 className={`font-bold text-sm ${textPrimary}`}>{reason === 'Upgrade Request' ? 'Upgrade Subscription' : 'Report Issue / Feedback'}</h3>
+                <p className={`text-xs ${textSecondary}`}>{reason === 'Upgrade Request' ? 'Request Pro Access' : `Flow: ${flowName}`}</p>
             </div>
           </div>
           <button onClick={onClose} className={`p-2 rounded-full transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-500'}`}>
@@ -71,6 +84,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, onSub
                     className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all appearance-none ${inputBg}`}
                 >
                     <option value="Bug">🐛 Bug / Error</option>
+                    <option value="Upgrade Request">🚀 Upgrade Request</option>
                     <option value="Malware">⚠️ Malware / Harmful</option>
                     <option value="Spam">🚫 Spam / Low Quality</option>
                     <option value="Feedback">💡 Feedback / Suggestion</option>
@@ -83,7 +97,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, onSub
                 <textarea 
                     value={description}
                     onChange={e => setDescription(e.target.value)}
-                    placeholder="Describe the issue, error, or feedback in detail..."
+                    placeholder={reason === 'Upgrade Request' ? "I'm interested in upgrading..." : "Describe the issue, error, or feedback in detail..."}
                     className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all min-h-[150px] resize-none ${inputBg}`}
                     required
                 ></textarea>
@@ -110,7 +124,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, onSub
                             ? 'bg-slate-600 opacity-50 cursor-not-allowed' 
                             : 'bg-blue-600 hover:bg-blue-500 hover:shadow-blue-500/25 active:scale-95'}`}
                 >
-                    {isSubmitting ? 'Sending...' : <><Send className="w-4 h-4" /> Send Report</>}
+                    {isSubmitting ? 'Sending...' : <><Send className="w-4 h-4" /> {reason === 'Upgrade Request' ? 'Send Request' : 'Send Report'}</>}
                 </button>
             </div>
         </form>
