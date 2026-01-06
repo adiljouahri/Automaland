@@ -12,7 +12,7 @@ import { generateAutomationFlow, verifyAutomationFlow } from './services/ai';
 import { StrapiService } from './services/strapi';
 import { LocalStoreService } from './services/local';
 import { AutomationFlow, LogEntry, ChatMessage, AppStatus, AppSettings, EnvVariable, WatcherConfig, NpmPackage, HostAppConfig, User, FlowVersion } from './types';
-import { INITIAL_UI_SCHEMA, INITIAL_NODE_CODE, INITIAL_APP_CODE } from './constants';
+import { INITIAL_UI_SCHEMA, INITIAL_NODE_CODE, INITIAL_APP_CODE, GUMROAD_PERMALINK } from './constants';
 import { ADAPTER_CODE } from './adapter';
 
 function App() {
@@ -943,9 +943,18 @@ ${result.analysis}
       setIsReportModalOpen(true);
   };
 
-  const handleUpgradeClick = () => {
-      setReportModalReason("Upgrade Request");
-      setIsReportModalOpen(true);
+  // Replaced with direct Gumroad Link
+  const handleUpgradeClick = async () => {
+      const gumroadUrl = `https://gumroad.com/l/${GUMROAD_PERMALINK}`; 
+      try {
+          if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+              await open(gumroadUrl);
+          } else {
+              window.open(gumroadUrl, '_blank');
+          }
+      } catch (e) {
+          console.error("Failed to open link", e);
+      }
   };
 
   const handleSubmitReport = async (reason: string, description: string) => {

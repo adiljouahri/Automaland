@@ -66,6 +66,29 @@ export class StrapiService {
     return await res.json();
   }
 
+  async activateLicense(licenseKey: string, productPermalink?: string): Promise<User> {
+    if (!this.token) throw new Error("You must be logged in to activate a license.");
+    
+    const res = await fetch(`${this.baseUrl}/api/auth/activate-license`, {
+        method: 'POST',
+        headers: { 
+            'Authorization': `Bearer ${this.token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+            licenseKey,
+            permalink: productPermalink // Optional: If you want to enforce specific product
+        })
+    });
+
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error?.message || err.message || "Activation Failed");
+    }
+
+    return await res.json();
+  }
+
   /**
    * Helper to look up a Public Flow by UUID
    * Returns object containing id, documentId, and attributes
