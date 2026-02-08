@@ -98,7 +98,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       try {
           // Pass the hardcoded permalink to ensure they bought OUR product
           const updatedUser = await strapi.activateLicense(licenseKey.trim(), GUMROAD_PERMALINK);
-          setActivateMsg({ type: 'success', text: `Success! Subscription active until ${new Date(updatedUser.subscriptionEndDate).toLocaleDateString()}.` });
+          setActivateMsg({ type: 'success', text: `Success! Subscription active until ${new Date(updatedUser?.subscriptionEndDate ?? new Date()).toLocaleDateString()}.` });
           setLicenseKey('');
           // Force page reload to sync app state (or rely on next poll/context update if implemented)
           setTimeout(() => window.location.reload(), 2000); 

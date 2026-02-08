@@ -241,7 +241,7 @@ async function ensureBridge(adapterCode) {
         if (success === true) {
             bridgeReady = true;
             installedApps = hostBridge.getInstalledApps();
-            console.log("[Sidecar] Host Bridge Ready.");
+            console.log("[Sidecar] Host Bridge Ready.",installedApps.map(r=>r?.name));
         } else {
             console.warn("[Sidecar] Host Bridge did not initialize (Simulation Mode).");
             bridgeReady = false;
@@ -800,6 +800,7 @@ app.get('/api/auth/callback', async (req, res) => {
 });
 
 app.get('/api/adobe/apps', async (req, res) => {
+    console.log('bridgeReady',bridgeReady)
     if (!bridgeReady) {
         return res.json([
             { id: 'photoshop', name: 'Photoshop (Simulated)', specifier: 'photoshop' },
@@ -807,6 +808,7 @@ app.get('/api/adobe/apps', async (req, res) => {
             { id: 'indesign', name: 'InDesign (Simulated)', specifier: 'indesign' }
         ]);
     }
+    
     res.json(hostBridge.getInstalledApps());
 });
 

@@ -646,7 +646,9 @@ function App() {
           // IMPORTANT: Watchers need adapter code too if they trigger flows
           adapterCode: ADAPTER_CODE
         })
-      }).catch(() => {});
+      }).catch((err) => {
+        console.log(err)
+      });
     }
   }, [watchers, flows, envVars, safeServerRequest]);
 
@@ -803,8 +805,12 @@ function App() {
       let mounted = true;
       safeServerRequest('/api/adobe/apps')
         .then(res => res.json())
-        .then(data => { if (mounted) setAvailableApps(data); })
-        .catch(() => {
+        .then(data => { 
+            console.log(mounted,data)
+            if (mounted) setAvailableApps(data);
+         })
+        .catch((err) => {
+            console.log(err)
             if (mounted) {
                 setAvailableApps([
                     { id: 'photoshop', name: 'Photoshop', specifier: 'photoshop' },
@@ -1067,6 +1073,7 @@ ${result.analysis}
            body: JSON.stringify(nodePayload) 
        });
        const nodeResponse = await res.json();
+       console.log(nodeResponse)
        if (!nodeResponse.success) throw new Error(nodeResponse.error || "Node.js Execution Failed");
        addLog(`Action completed.`, "NODE", "success");
     } catch(e: any) { 

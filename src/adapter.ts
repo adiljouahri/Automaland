@@ -53,8 +53,9 @@ class ExtendScriptFacade extends events.EventEmitter {
 
         const fullPath = path.join(this.libRoot, relativePath);
         
-        console.log(\`[ExtendScriptFacade] Attempting to load native module from: \${fullPath}\`);
-        
+        console.log(\`[ExtendScriptFacade] Attempting to load native module from: \${fullPath}\`,fs.existsSync(fullPath));
+        console.log(!fs.existsSync(fullPath))
+        console.log(path.join(this.libRoot, "esdcorelibinterface.node"))
         if (!fs.existsSync(fullPath)) {
             const flatPath = path.join(this.libRoot, "esdcorelibinterface.node");
             if (fs.existsSync(flatPath)) {
@@ -62,7 +63,10 @@ class ExtendScriptFacade extends events.EventEmitter {
                 return require(flatPath);
             }
             throw new Error(\`Module file not found at: \${fullPath}\`);
-        }
+        }else{
+           console.log(\`[ExtendScriptFacade] Not found\`);
+  
+            }
 
         try {
             return require(fullPath);
