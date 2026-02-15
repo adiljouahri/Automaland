@@ -51,8 +51,6 @@ export interface User {
   username: string;
   email: string;
   createdAt: string; // ISO Date string from Strapi
-  subscriptionStatus?: 'trial' | 'active' | 'expired' | 'pending_upgrade';
-  subscriptionEndDate?: string; // ISO Date string
 }
 
 export interface AuthResponse {

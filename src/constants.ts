@@ -1,6 +1,4 @@
 
-// TODO: Replace 'tripanel-pro' with your actual Gumroad product permalink (the part after /l/ in the URL)
-export const GUMROAD_PERMALINK = 'TriPanelAutomatorPro'; 
 
 export const INITIAL_UI_SCHEMA = JSON.stringify({
   title: "Asset Processor",

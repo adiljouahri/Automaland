@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { AutomationFlow, AIProvider, AppSettings, LogEntry } from "../types";
 
@@ -121,7 +122,7 @@ export const verifyAutomationFlow = async (
     };
 
     const response = await ai.models.generateContent({
-        model: aiModel || 'gemini-2.0-flash',
+        model: aiModel || 'gemini-1.5-pro',
         contents: userPrompt,
         config: {
             systemInstruction: SECURITY_INSTRUCTION,
@@ -285,7 +286,7 @@ ${logString}
     };
 
     const response = await ai.models.generateContent({
-      model: aiModel || 'gemini-2.0-flash', 
+      model: aiModel || 'gemini-1.5-pro', 
       contents: userPrompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,

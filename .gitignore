@@ -6,12 +6,15 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
+MARKETING_STRATEGY.md
 node_modules
 dist
+target
+gen
 dist-ssr
+bin
 *.local
-
+build
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -23,3 +26,18 @@ dist-ssr
 *.sln
 *.sw?
 MARKETING_STRATEGY.md
+# Environment variables
+.env
+.env*.local
+
+# Logs and temp files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Tauri dev watcher (if using .taurignore)
+.taurignore
+
+# Rust build artifacts
+src-tauri/target/

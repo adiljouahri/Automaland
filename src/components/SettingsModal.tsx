@@ -1,9 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { AppSettings, WatcherConfig, EnvVariable, NpmPackage, AIProvider, AutomationFlow, User, Report } from '../types';
 import { StrapiService } from '../services/strapi';
-import { X, Plus, Trash2, Folder, Server, Cpu, Lock, Eye, Clock, Calendar, FileText, RefreshCw, MessageSquareWarning, CheckCircle, AlertCircle, Clock as ClockIcon, Ban, CreditCard, Key, Check } from 'lucide-react';
+import { X, Plus, Trash2, Folder, Server, Cpu, Lock, Eye, Clock, Calendar, FileText, RefreshCw, MessageSquareWarning, CheckCircle, AlertCircle, Clock as ClockIcon, Ban } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { GUMROAD_PERMALINK } from '../constants';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -22,9 +22,28 @@ interface SettingsModalProps {
 }
 
 const PROVIDER_MODELS: Record<AIProvider, string[]> = {
-  gemini: ['gemini-2.0-flash', 'gemini-2.0-pro-exp-02-05', 'gemini-3-pro-preview', 'gemini-1.5-pro'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'o1-preview'],
-  claude: ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
+  gemini: [
+    'gemini-1.5-pro',
+    'gemini-1.5-pro-002',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-002',
+    'gemini-1.5-flash-8b',
+    'gemini-2.0-flash-exp' // Experimental
+  ],
+  openai: [
+    'gpt-4o',
+    'gpt-4o-2024-08-06',
+    'gpt-4o-mini',
+    'o1-preview',
+    'o1-mini',
+    'gpt-4-turbo'
+  ],
+  claude: [
+    'claude-3-5-sonnet-20241022',
+    'claude-3-opus-20240229',
+    'claude-3-haiku-20240307',
+    'claude-3-5-sonnet-latest'
+  ],
   custom: []
 };
 
@@ -36,22 +55,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   strapi,
   user
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'env' | 'watchers' | 'logs' | 'reports' | 'subscription'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'env' | 'watchers' | 'logs' | 'reports'>('general');
   const [newEnvKey, setNewEnvKey] = useState('');
   const [newEnvVal, setNewEnvVal] = useState('');
   const [logPaths, setLogPaths] = useState<{serverLog: string, adobeLog: string, tauriLog: string} | null>(null);
   const [restarting, setRestarting] = useState(false);
   const [myReports, setMyReports] = useState<Report[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
-  
-  // Subscription State
-  const [licenseKey, setLicenseKey] = useState('');
-  const [activating, setActivating] = useState(false);
-  const [activateMsg, setActivateMsg] = useState<{type: 'success'|'error', text: string} | null>(null);
 
   const currentPresets = PROVIDER_MODELS[settings.aiProvider] || [];
-  const isUsingCustomModel = !currentPresets.includes(settings.aiModel) && settings.aiModel !== '';
-  const [showCustomModelInput, setShowCustomModelInput] = useState(isUsingCustomModel || settings.aiProvider === 'custom');
+  // Check if current model is in presets. If not, we assume custom input mode, UNLESS provider is 'custom' which always shows input.
+  const isPreset = currentPresets.includes(settings.aiModel);
+  const [showCustomModelInput, setShowCustomModelInput] = useState(!isPreset || settings.aiProvider === 'custom');
 
   const isDark = settings.theme === 'dark';
 
@@ -91,24 +106,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }
   };
 
-  const handleActivateLicense = async () => {
-      if (!licenseKey.trim()) return;
-      setActivating(true);
-      setActivateMsg(null);
-      try {
-          // Pass the hardcoded permalink to ensure they bought OUR product
-          const updatedUser = await strapi.activateLicense(licenseKey.trim(), GUMROAD_PERMALINK);
-          setActivateMsg({ type: 'success', text: `Success! Subscription active until ${new Date(updatedUser?.subscriptionEndDate ?? new Date()).toLocaleDateString()}.` });
-          setLicenseKey('');
-          // Force page reload to sync app state (or rely on next poll/context update if implemented)
-          setTimeout(() => window.location.reload(), 2000); 
-      } catch (e: any) {
-          setActivateMsg({ type: 'error', text: e.message });
-      } finally {
-          setActivating(false);
-      }
-  };
-
   const getStatusBadge = (status: string) => {
       switch(status) {
           case 'resolved': return <span className="flex items-center gap-1 text-xs font-bold text-green-500 bg-green-500/10 px-2 py-1 rounded"><CheckCircle className="w-3 h-3"/> Resolved</span>;
@@ -144,7 +141,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className={`w-48 ${sidebarBg} border-r ${sidebarBorder} p-4 space-y-2`}>
             {[
               { id: 'general', label: 'Connections', icon: <Server className="w-4 h-4" /> },
-              { id: 'subscription', label: 'Subscription', icon: <CreditCard className="w-4 h-4" /> },
               { id: 'ai', label: 'AI Provider', icon: <Cpu className="w-4 h-4" /> },
               { id: 'env', label: 'Environment', icon: <Lock className="w-4 h-4" /> },
               { id: 'watchers', label: 'Watchers', icon: <Eye className="w-4 h-4" /> },
@@ -193,75 +189,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                 </div>
               </div>
-            )}
-
-            {activeTab === 'subscription' && (
-                <div className="space-y-6">
-                    {/* Status Card */}
-                    <div className={`p-6 rounded-xl border ${cardBg}`}>
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <h3 className={`text-sm font-bold uppercase tracking-wider mb-1 ${labelText}`}>Current Plan</h3>
-                                <div className={`text-2xl font-bold flex items-center gap-2 ${user?.subscriptionStatus === 'active' ? 'text-yellow-500' : user?.subscriptionStatus === 'expired' ? 'text-red-500' : 'text-green-500'}`}>
-                                    {user?.subscriptionStatus?.toUpperCase() || 'GUEST'}
-                                    {user?.subscriptionStatus === 'active' && <CheckCircle className="w-5 h-5 fill-current" />}
-                                </div>
-                                {user?.subscriptionEndDate && (
-                                    <div className="flex items-center gap-2 mt-2 text-xs text-slate-500">
-                                        <Calendar className="w-3.5 h-3.5" />
-                                        Expires: {new Date(user.subscriptionEndDate).toLocaleDateString()}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="text-right">
-                                {user?.subscriptionStatus !== 'active' && (
-                                    <a 
-                                        href={`https://gumroad.com/l/${GUMROAD_PERMALINK}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer" 
-                                        className="inline-block text-blue-500 text-sm hover:underline"
-                                    >
-                                        Get License Key
-                                    </a>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Activation Form */}
-                    <div className="space-y-4">
-                        <label className={`block text-xs font-bold uppercase tracking-wider ${labelText}`}>Sync Subscription</label>
-                        <div className="flex gap-2">
-                             <div className={`flex items-center gap-2 flex-1 border ${inputBorder} rounded px-3 bg-opacity-50 ${inputBg}`}>
-                                <Key className="w-4 h-4 text-slate-500" />
-                                <input 
-                                    type="text" 
-                                    placeholder="Enter your Gumroad license key..." 
-                                    value={licenseKey}
-                                    onChange={e => setLicenseKey(e.target.value)}
-                                    className={`flex-1 py-3 bg-transparent text-sm focus:outline-none ${inputText}`}
-                                />
-                             </div>
-                             <button 
-                                onClick={handleActivateLicense}
-                                disabled={activating || !licenseKey}
-                                className={`px-6 rounded font-bold text-sm transition-all shadow-lg ${activating ? 'bg-slate-700 cursor-not-allowed text-slate-400' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
-                             >
-                                 {activating ? 'Verifying...' : 'Sync & Activate'}
-                             </button>
-                        </div>
-                        {activateMsg && (
-                            <div className={`text-xs p-3 rounded flex items-center gap-2 ${activateMsg.type === 'success' ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
-                                {activateMsg.type === 'success' ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                                {activateMsg.text}
-                            </div>
-                        )}
-                        <p className="text-[10px] text-slate-500">
-                            Paste the license key from your Gumroad receipt. <br/>
-                            <span className="text-blue-500 font-bold">Tip:</span> You can start a <strong>1-Month Free Trial</strong> on Gumroad to generate a key and extend your access immediately without an upfront charge.
-                        </p>
-                    </div>
-                </div>
             )}
 
             {activeTab === 'logs' && (
@@ -331,6 +258,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             onChange={e => {
                                 if (e.target.value === '__custom__') {
                                     setShowCustomModelInput(true);
+                                    onSaveSettings({...settings, aiModel: ''});
                                 } else {
                                     onSaveSettings({...settings, aiModel: e.target.value});
                                 }
@@ -345,7 +273,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <input 
                                 type="text" 
                                 value={settings.aiModel} 
-                                placeholder="Enter model name..." 
+                                placeholder="e.g. gpt-4-turbo" 
                                 onChange={e => onSaveSettings({...settings, aiModel: e.target.value})} 
                                 className={`w-full ${inputBg} border ${inputBorder} rounded p-3 ${inputText} text-sm`} 
                             />
@@ -367,6 +295,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div>
                     <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${labelText}`}>API Base URL</label>
                     <input type="text" value={settings.aiBaseUrl} placeholder="https://api.openai.com/v1/chat/completions" onChange={e => onSaveSettings({...settings, aiBaseUrl: e.target.value})} className={`w-full ${inputBg} border ${inputBorder} rounded p-3 ${inputText} text-sm`} />
+                    <p className="mt-2 text-[10px] text-slate-500">Required for Local LLMs (Ollama/LM Studio) or Enterprise Endpoints.</p>
                   </div>
                 )}
               </div>

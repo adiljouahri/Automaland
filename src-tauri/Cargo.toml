@@ -1,7 +1,7 @@
 [package]
-name = "tripanel-automator"
+name = "Automaland"
 version = "0.1.0"
-description = "TriPanel Automator"
+description = "Automaland"
 authors = ["you"]
 edition = "2021"
 

@@ -1,5 +1,6 @@
+
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key, CheckSquare, Square, ShieldCheck, Flag, Crown } from 'lucide-react';
+import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key, CheckSquare, Square, ShieldCheck, Flag } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core'; // Import invoke from Tauri
 import { save, ask } from '@tauri-apps/plugin-dialog';
 import { open } from '@tauri-apps/plugin-shell';
@@ -12,7 +13,7 @@ import { generateAutomationFlow, verifyAutomationFlow } from './services/ai';
 import { StrapiService } from './services/strapi';
 import { LocalStoreService } from './services/local';
 import { AutomationFlow, LogEntry, ChatMessage, AppStatus, AppSettings, EnvVariable, WatcherConfig, NpmPackage, HostAppConfig, User, FlowVersion } from './types';
-import { INITIAL_UI_SCHEMA, INITIAL_NODE_CODE, INITIAL_APP_CODE, GUMROAD_PERMALINK } from './constants';
+import { INITIAL_UI_SCHEMA, INITIAL_NODE_CODE, INITIAL_APP_CODE } from './constants';
 import { ADAPTER_CODE } from './adapter';
 
 function App() {
@@ -24,7 +25,7 @@ function App() {
       aiProvider: 'gemini',
       aiModel: 'gemini-3-pro-preview',
       serverUrl: 'http://localhost:3001',
-      strapiUrl: 'https://tripanelserver-9a123e242287.herokuapp.com',
+      strapiUrl: 'http://localhost:1337',
       theme: 'dark'
     };
   });
@@ -127,56 +128,6 @@ function App() {
   const [activeFlowId, setActiveFlowId] = useState<string>(() => {
       return localStorage.getItem('active_flow_id') || 'default-flow-1';
   });
-
-  // TRIAL / SUBSCRIPTION LOGIC
-  const subscriptionStatus = useMemo(() => {
-    if (!user) return { type: 'guest', isExpired: false, daysLeft: 0 };
-    
-    // 1. Check Explicit 'active' status (Paid)
-    if (user.subscriptionStatus === 'active') {
-        return { type: 'active', isExpired: false, daysLeft: 999 };
-    }
-
-    // 2. Check Pending Upgrade
-    if (user.subscriptionStatus === 'pending_upgrade') {
-        return { type: 'pending', isExpired: true, daysLeft: 0 };
-    }
-
-    // 3. Fallback to Trial Logic
-    let endDate;
-    if (user.subscriptionEndDate) {
-        endDate = new Date(user.subscriptionEndDate).getTime();
-    } else {
-        // Legacy/Default: 15 days from registration
-        const createdAt = new Date(user.createdAt).getTime();
-        endDate = createdAt + (15 * 24 * 60 * 60 * 1000);
-    }
-
-    const now = Date.now();
-    const diffMs = endDate - now;
-    const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    
-    return {
-        type: user.subscriptionStatus || 'trial',
-        isExpired: daysLeft <= 0,
-        daysLeft: Math.max(0, daysLeft)
-    };
-  }, [user]);
-
-  // LIMITS LOGIC
-  const flowLimitStatus = useMemo(() => {
-      if (!user) return { count: 0, limit: 20, isReached: false };
-      // Unlimited for active subscribers
-      if (subscriptionStatus.type === 'active') return { count: 0, limit: 9999, isReached: false };
-      
-      const myFlows = flows.filter(f => f.ownerId === user.id);
-      return {
-          count: myFlows.length,
-          limit: 20,
-          isReached: myFlows.length >= 20
-      };
-  }, [flows, user, subscriptionStatus.type]);
-
 
   // Persist Active Flow ID
   useEffect(() => {
@@ -646,9 +597,7 @@ function App() {
           // IMPORTANT: Watchers need adapter code too if they trigger flows
           adapterCode: ADAPTER_CODE
         })
-      }).catch((err) => {
-        console.log(err)
-      });
+      }).catch(() => {});
     }
   }, [watchers, flows, envVars, safeServerRequest]);
 
@@ -805,12 +754,8 @@ function App() {
       let mounted = true;
       safeServerRequest('/api/adobe/apps')
         .then(res => res.json())
-        .then(data => { 
-            console.log(mounted,data)
-            if (mounted) setAvailableApps(data);
-         })
-        .catch((err) => {
-            console.log(err)
+        .then(data => { if (mounted) setAvailableApps(data); })
+        .catch(() => {
             if (mounted) {
                 setAvailableApps([
                     { id: 'photoshop', name: 'Photoshop', specifier: 'photoshop' },
@@ -837,17 +782,6 @@ function App() {
   };
 
   const handleCreateNewFlow = () => {
-    if (flowLimitStatus.isReached) {
-        alert("Flow Limit Reached. Upgrade to Pro for unlimited flows.");
-        return;
-    }
-    if (subscriptionStatus.isExpired) {
-        alert("Trial Expired. Please upgrade to continue creating flows.");
-        setReportModalReason("Upgrade Request");
-        setIsReportModalOpen(true);
-        return;
-    }
-
     const newId = `flow-${Date.now()}`;
     const defaultApp = availableApps.length > 0 ? (availableApps[0].specifier || availableApps[0].id) : 'photoshop';
     const newFlow: AutomationFlow = {
@@ -949,20 +883,6 @@ ${result.analysis}
       setIsReportModalOpen(true);
   };
 
-  // Replaced with direct Gumroad Link
-  const handleUpgradeClick = async () => {
-      const gumroadUrl = `https://gumroad.com/l/${GUMROAD_PERMALINK}`; 
-      try {
-          if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-              await open(gumroadUrl);
-          } else {
-              window.open(gumroadUrl, '_blank');
-          }
-      } catch (e) {
-          console.error("Failed to open link", e);
-      }
-  };
-
   const handleSubmitReport = async (reason: string, description: string) => {
       if (!activeFlow && reason !== 'Upgrade Request') return;
       
@@ -982,12 +902,6 @@ ${result.analysis}
 
   const handleSendMessage = async () => {
     if (!activeFlow) return;
-    if (subscriptionStatus.isExpired) {
-        const warning: ChatMessage = { id: Date.now().toString(), role: 'model', text: 'Trial Expired. Please upgrade to continue.', timestamp: new Date() };
-        updateActiveFlow({ chatHistory: [...activeFlow.chatHistory, warning] });
-        // Optionally trigger modal here too
-        return;
-    }
     // ... rest of handleSendMessage
     if (!isOwner) {
        alert("Duplicate this flow to use AI chat.");
@@ -1073,7 +987,6 @@ ${result.analysis}
            body: JSON.stringify(nodePayload) 
        });
        const nodeResponse = await res.json();
-       console.log(nodeResponse)
        if (!nodeResponse.success) throw new Error(nodeResponse.error || "Node.js Execution Failed");
        addLog(`Action completed.`, "NODE", "success");
     } catch(e: any) { 
@@ -1111,20 +1024,19 @@ ${result.analysis}
                         ? "Please complete the login process in the browser window that just opened."
                         : "Connecting to server..."}
                 </p>
-                {/* ... Error & Cancel button same ... */}
             </div>
         </div>
      );
   }
 
   if (!user) {
-    // ... Login UI same ...
+    // ... Login UI ...
     return (
       <div className={`flex items-center justify-center min-h-screen ${bgMain} p-6`}>
         <div className={`max-w-md w-full rounded-2xl p-8 shadow-2xl border ${borderPrimary} ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
            <div className="flex flex-col items-center mb-8">
               <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl flex items-center justify-center mb-4 shadow-xl"><Cpu className="text-white w-8 h-8" /></div>
-              <h2 className={`text-2xl font-bold ${textPrimary}`}>TriPanel Automator</h2>
+              <h2 className={`text-2xl font-bold ${textPrimary}`}>Automaland</h2>
               <p className={`text-sm ${textSecondary}`}>Sign in to sync your flows</p>
            </div>
            
@@ -1146,8 +1058,8 @@ ${result.analysis}
                     <input type="text" placeholder="Identifier" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.identifier} onChange={e => setAuthData({...authData, identifier: e.target.value})} />
                     <input type="password" placeholder="Password" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.password} onChange={e => setAuthData({...authData, password: e.target.value})} />
                     <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-all">{authMode === 'login' ? 'Login' : 'Register'}</button>
-               
-                   
+                    
+                    
                 </form>
                 <div className="flex justify-between mt-4">
                     <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="text-sm text-blue-500 hover:underline">{authMode === 'login' ? "New here? Register" : "Have an account? Login"}</button>
@@ -1302,56 +1214,6 @@ ${result.analysis}
             </div>
           </>
         )}
-        
-        {/* ACCOUNT STATUS FOOTER */}
-        {user && (
-            <div className={`p-3 text-[10px] border-t ${borderPrimary} ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                {/* STATUS HEADER */}
-                <div className="flex justify-between items-center mb-2">
-                    <span className="font-bold text-slate-500 uppercase">Subscription</span>
-                    <span className={`font-bold ${
-                        subscriptionStatus.type === 'active' ? 'text-yellow-500 flex items-center gap-1' : 
-                        subscriptionStatus.isExpired ? 'text-red-500' : 'text-green-500'
-                    }`}>
-                        {subscriptionStatus.type === 'active' ? <><Crown className="w-3 h-3 fill-current"/> PRO</> : 
-                         subscriptionStatus.isExpired ? 'EXPIRED' : 'TRIAL'}
-                    </span>
-                </div>
-
-                {/* VISUAL INDICATOR */}
-                {subscriptionStatus.type !== 'active' && (
-                    <div className="mb-2">
-                        <div className="flex justify-between text-xs mb-1">
-                            <span className="text-slate-500">{subscriptionStatus.daysLeft} days left</span>
-                        </div>
-                        <div className="w-full h-1 bg-slate-700 rounded-full overflow-hidden">
-                            <div className={`h-full ${subscriptionStatus.isExpired ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, (subscriptionStatus.daysLeft / 15) * 100)}%` }}></div>
-                        </div>
-                    </div>
-                )}
-
-                {/* UPGRADE BUTTON if not active */}
-                {subscriptionStatus.type !== 'active' && (
-                    <button 
-                        onClick={handleUpgradeClick}
-                        className={`w-full flex items-center justify-center gap-2 py-1.5 rounded font-bold text-xs transition-colors mb-2 ${
-                            subscriptionStatus.isExpired 
-                            ? 'bg-red-600 hover:bg-red-500 text-white animate-pulse' 
-                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                        }`}
-                    >
-                        {subscriptionStatus.isExpired ? 'Upgrade Now' : 'Upgrade Plan'}
-                    </button>
-                )}
-
-                <div className="flex justify-between items-center mb-1 mt-2 border-t border-slate-800/50 pt-2">
-                    <span className="font-bold text-slate-500">Flow Limit</span>
-                    <span className={flowLimitStatus.isReached ? 'text-red-500 font-bold' : 'text-slate-400'}>
-                        {flowLimitStatus.count} / {flowLimitStatus.limit > 1000 ? '∞' : flowLimitStatus.limit}
-                    </span>
-                </div>
-            </div>
-        )}
       </div>
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -1387,13 +1249,6 @@ ${result.analysis}
                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30 text-green-500 text-xs font-bold animate-pulse" title="Watchers are active and scanning...">
                      <Eye className="w-3.5 h-3.5" /> Watching
                  </div>
-            )}
-
-            {/* Expired Warning */}
-            {subscriptionStatus.isExpired && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-red-500/10 border border-red-500/30 text-red-500 text-xs font-bold cursor-pointer hover:bg-red-500/20 transition-colors" onClick={handleUpgradeClick}>
-                    <AlertOctagon className="w-3.5 h-3.5" /> Trial Expired
-                </div>
             )}
             
             {/* IMPORT / EXPORT BUTTONS */}
@@ -1440,8 +1295,8 @@ ${result.analysis}
             
             <button 
                 onClick={handleCreateNewFlow} 
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border transition-colors ${flowLimitStatus.isReached || subscriptionStatus.isExpired ? 'opacity-50 cursor-not-allowed bg-slate-700 text-slate-400' : (isDark ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-300')}`}
-                title={flowLimitStatus.isReached ? "Flow Limit Reached" : subscriptionStatus.isExpired ? "Trial Expired" : "Create New"}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border transition-colors ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-300'}`}
+                title="Create New"
             >
                 <Plus className="w-3.5 h-3.5" /> New
             </button>
@@ -1484,7 +1339,7 @@ ${result.analysis}
                  </div>
                  <h2 className="text-xl font-bold mb-2">Ready to Automate</h2>
                  <p className="text-slate-500 max-w-sm text-center mb-8">Select a flow from the library or create a new one to get started.</p>
-                 <button onClick={handleCreateNewFlow} className={`flex items-center gap-2 px-6 py-3 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 transition-all shadow-lg hover:shadow-blue-500/20 ${(subscriptionStatus.isExpired || flowLimitStatus.isReached) ? 'opacity-50 cursor-not-allowed bg-slate-700' : ''}`}>
+                 <button onClick={handleCreateNewFlow} className="flex items-center gap-2 px-6 py-3 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 transition-all shadow-lg hover:shadow-blue-500/20">
                      <Plus className="w-5 h-5" /> Create New Flow
                  </button>
              </div>

@@ -1,5 +1,6 @@
+
 {
-  "name": "TriPanel Automator",
-  "description": "A React-based simulator for the 3-Panel AI Automation Architecture. Design, prompt, and visualize Adobe & Node.js automation flows.",
+  "name": "Automaland",
+  "description": "The AI-native automation platform for creative professionals. Design, prompt, and orchestrate Adobe & Node.js workflows.",
   "requestFramePermissions": []
 }

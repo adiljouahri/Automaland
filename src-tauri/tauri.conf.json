@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tripanel-automator",
+  "productName": "Automaland",
   "version": "0.1.0",
-  "identifier": "com.pt.tripanel-automator",
+  "identifier": "com.pt.Automaland",
   "build": {
        
     "beforeDevCommand": "npm --prefix server run bundle && npm run dev",
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "tripanel-automator",
+        "title": "Automaland",
         "width": 1280,
         "height": 800,
         "devtools": true
