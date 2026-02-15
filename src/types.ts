@@ -41,8 +41,17 @@ export interface Report {
   flowId: string;
   reason: string;
   description: string;
-  reportStatus: 'pending' | 'investigating' | 'resolved' | 'dismissed';
+  reportStatus: string;
   adminFeedback?: string;
+  createdAt: string;
+}
+
+export interface Announcement {
+  id: number;
+  title: string;
+  message: string;
+  announcementType: string;
+  link?: string;
   createdAt: string;
 }
 

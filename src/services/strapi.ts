@@ -1,5 +1,5 @@
 
-import { AuthResponse, AutomationFlow, User, Report } from "../types";
+import { AuthResponse, AutomationFlow, User, Report, Announcement } from "../types";
 
 export class StrapiService {
   private baseUrl: string;
@@ -286,6 +286,31 @@ export class StrapiService {
           });
       } catch (e) {
           console.error("Failed to fetch reports", e);
+          return [];
+      }
+  }
+
+  async getAnnouncements(): Promise<Announcement[]> {
+      try {
+          // Public endpoint, sorts by newest
+          const res = await fetch(`${this.baseUrl}/api/announcements?sort=createdAt:desc&pagination[pageSize]=5`);
+          
+          if (!res.ok) return [];
+          const json = await res.json();
+          
+          return (json.data || []).map((item: any) => {
+              const attrs = item.attributes || item;
+              return {
+                  id: item.id,
+                  title: attrs.title,
+                  message: attrs.message,
+                  announcementType: attrs.announcementType || 'info',
+                  link: attrs.link,
+                  createdAt: attrs.createdAt
+              };
+          });
+      } catch (e) {
+          // Silent fail for announcements is better than crashing
           return [];
       }
   }

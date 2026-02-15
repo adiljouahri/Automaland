@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key, CheckSquare, Square, ShieldCheck, Flag } from 'lucide-react';
+import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key, CheckSquare, Square, ShieldCheck, Flag, Bell, ExternalLink, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core'; // Import invoke from Tauri
 import { save, ask } from '@tauri-apps/plugin-dialog';
 import { open } from '@tauri-apps/plugin-shell';
@@ -12,7 +12,7 @@ import { ReportModal } from './components/ReportModal';
 import { generateAutomationFlow, verifyAutomationFlow } from './services/ai';
 import { StrapiService } from './services/strapi';
 import { LocalStoreService } from './services/local';
-import { AutomationFlow, LogEntry, ChatMessage, AppStatus, AppSettings, EnvVariable, WatcherConfig, NpmPackage, HostAppConfig, User, FlowVersion } from './types';
+import { AutomationFlow, LogEntry, ChatMessage, AppStatus, AppSettings, EnvVariable, WatcherConfig, NpmPackage, HostAppConfig, User, FlowVersion, Announcement } from './types';
 import { INITIAL_UI_SCHEMA, INITIAL_NODE_CODE, INITIAL_APP_CODE } from './constants';
 import { ADAPTER_CODE } from './adapter';
 
@@ -123,6 +123,9 @@ function App() {
   
   const [viewMode, setViewMode] = useState<'editor' | 'grid'>('editor');
   
+  // Announcement State
+  const [activeAnnouncement, setActiveAnnouncement] = useState<Announcement | null>(null);
+
   // Initial State: Try to load active flow ID from localStorage
   const [flows, setFlows] = useState<AutomationFlow[]>([]);
   const [activeFlowId, setActiveFlowId] = useState<string>(() => {
@@ -157,6 +160,31 @@ function App() {
           setFormData({});
       }
   }, [activeFlow?.id]);
+  
+  // --- CHECK ANNOUNCEMENTS ---
+  useEffect(() => {
+      const checkAnnouncements = async () => {
+          const items = await strapi.getAnnouncements();
+          if (items.length > 0) {
+              const latest = items[0];
+              const lastSeen = localStorage.getItem('last_seen_announcement');
+              
+              // Only show if ID is greater/different than last seen
+              if (!lastSeen || Number(latest.id) > Number(lastSeen)) {
+                  setActiveAnnouncement(latest);
+              }
+          }
+      };
+      
+      checkAnnouncements();
+  }, [strapi]);
+
+  const handleDismissAnnouncement = () => {
+      if (activeAnnouncement) {
+          localStorage.setItem('last_seen_announcement', activeAnnouncement.id.toString());
+          setActiveAnnouncement(null);
+      }
+  };
 
   // Use loose equality for owner check to handle potential string/number mismatches from API
   const isOwner = activeFlow ? (activeFlow.ownerId == user?.id || !activeFlow.ownerId || !activeFlow.isPublic) : false;
@@ -1011,6 +1039,48 @@ ${result.analysis}
     return true; 
   }), [flows, flowListFilter, user?.id]);
 
+  // -- MAIN RENDER --
+  
+  // Announcement Modal
+  if (activeAnnouncement) {
+      return (
+          <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+              <div className={`w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl border animate-in zoom-in-95 duration-200 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <div className={`p-6 border-b flex items-center gap-4 ${isDark ? 'border-slate-800 bg-slate-950/50' : 'border-slate-100 bg-slate-50'}`}>
+                       <div className={`p-3 rounded-full ${activeAnnouncement.announcementType === 'alert' ? 'bg-red-500/20 text-red-500' : (activeAnnouncement.announcementType === 'update' ? 'bg-blue-500/20 text-blue-500' : 'bg-slate-500/20 text-slate-500')}`}>
+                           <Bell className="w-6 h-6" />
+                       </div>
+                       <div>
+                           <h2 className={`text-lg font-bold ${textPrimary}`}>{activeAnnouncement.title}</h2>
+                           <p className="text-xs text-slate-500">{new Date(activeAnnouncement.createdAt).toLocaleDateString()}</p>
+                       </div>
+                  </div>
+                  <div className={`p-6 ${isDark ? 'text-slate-300' : 'text-slate-600'} whitespace-pre-wrap leading-relaxed`}>
+                      {activeAnnouncement.message}
+                  </div>
+                  <div className={`p-4 border-t flex items-center justify-end gap-3 ${isDark ? 'border-slate-800 bg-slate-950/50' : 'border-slate-100 bg-slate-50'}`}>
+                      {activeAnnouncement.link && (
+                          <a 
+                             href={activeAnnouncement.link} 
+                             target="_blank" 
+                             rel="noopener noreferrer" 
+                             className="flex items-center gap-2 text-sm font-medium text-blue-500 hover:underline px-4"
+                          >
+                              Learn More <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                      )}
+                      <button 
+                        onClick={handleDismissAnnouncement}
+                        className={`px-5 py-2.5 rounded-lg font-bold text-sm bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition-all`}
+                      >
+                          Dismiss
+                      </button>
+                  </div>
+              </div>
+          </div>
+      );
+  }
+
   if (isAuthLoading) {
      return (
         <div className={`flex items-center justify-center min-h-screen ${bgMain}`}>
@@ -1059,7 +1129,20 @@ ${result.analysis}
                     <input type="password" placeholder="Password" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.password} onChange={e => setAuthData({...authData, password: e.target.value})} />
                     <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-all">{authMode === 'login' ? 'Login' : 'Register'}</button>
                     
+                    <div className="relative flex py-2 items-center">
+                        <div className={`flex-grow border-t ${borderPrimary}`}></div>
+                        <span className={`flex-shrink mx-4 text-xs ${textSecondary}`}>OR</span>
+                        <div className={`flex-grow border-t ${borderPrimary}`}></div>
+                    </div>
                     
+                    <button 
+                        type="button" 
+                        onClick={handleGoogleLogin}
+                        className={`w-full flex items-center justify-center gap-2 py-3 rounded-lg border transition-all ${isDark ? 'bg-white text-slate-800 hover:bg-slate-100' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                    >
+                        <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" /><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" /><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.26.81-.58z" /><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" /></svg>
+                        Continue with Google
+                    </button>
                 </form>
                 <div className="flex justify-between mt-4">
                     <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="text-sm text-blue-500 hover:underline">{authMode === 'login' ? "New here? Register" : "Have an account? Login"}</button>
