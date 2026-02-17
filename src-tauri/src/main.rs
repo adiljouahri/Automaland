@@ -169,7 +169,7 @@ fn delete_local_flow(app_handle: tauri::AppHandle, flow_id: String) -> Result<()
 #[tauri::command]
 fn get_server_config(app_handle: tauri::AppHandle) -> Result<String, String> {
     let home_dir = app_handle.path().home_dir().map_err(|e| e.to_string())?;
-    let config_path = home_dir.join(".tripanel").join("server.json");
+    let config_path = home_dir.join(".Automland").join("server.json");
     
     if config_path.exists() {
         let content = fs::read_to_string(config_path).map_err(|e| e.to_string())?;
@@ -186,11 +186,11 @@ fn save_text_file(path: String, content: String) -> Result<(), String> {
 #[tauri::command]
 fn get_log_paths(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let home_dir = app_handle.path().home_dir().map_err(|e| e.to_string())?;
-    let server_log = home_dir.join(".tripanel").join("logs").join("server.log");
+    let server_log = home_dir.join(".Automland").join("logs").join("server.log");
     
     // Adobe scripts usually log to My Documents/{app_name}/log.log based on our logger.jsx
     let docs_dir = app_handle.path().document_dir().map_err(|e| e.to_string())?;
-    let adobe_log = docs_dir.join("triPaneltApp").join("log.log");
+    let host_log = docs_dir.join("AutomlandtApp").join("log.log");
     
     // Tauri log
     let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -198,7 +198,7 @@ fn get_log_paths(app_handle: tauri::AppHandle) -> Result<serde_json::Value, Stri
 
     Ok(serde_json::json!({
         "serverLog": server_log.to_string_lossy(),
-        "adobeLog": adobe_log.to_string_lossy(),
+        "hostLog": host_log.to_string_lossy(),
         "tauriLog": tauri_log.to_string_lossy()
     }))
 }
@@ -209,11 +209,19 @@ fn spawn_sidecar_process(app: &tauri::AppHandle) {
     let exe_path = env::current_exe().ok();
     let exe_dir = exe_path.as_ref().and_then(|p| p.parent());
 
+    // Check multiple locations for the server script
+    // Tauri bundling structure varies by OS. On Windows it often nests parent folders under _up_.
     let possible_paths = vec![
+
         exe_dir.map(|p| p.join("server-sidecar.cjs")).unwrap_or(PathBuf::from("non_existent")),
+        exe_dir.map(|p| p.join("_up_").join("server").join("dist").join("server-sidecar.cjs")).unwrap_or(PathBuf::from("non_existent")),
+        
         resource_path.join("server-sidecar.cjs"),
         resource_path.join("dist").join("server-sidecar.cjs"),
-        resource_path.join("server").join("dist").join("server-sidecar.cjs")
+        resource_path.join("server").join("dist").join("server-sidecar.cjs"),
+        // Windows specific pathing with _up_
+        resource_path.join("_up_").join("server").join("dist").join("server-sidecar.cjs"),
+        resource_path.join("_up_").join("dist").join("server-sidecar.cjs")
     ];
     
     let mut server_script = PathBuf::new();
@@ -224,6 +232,9 @@ fn spawn_sidecar_process(app: &tauri::AppHandle) {
             server_script = p;
             found = true;
             break;
+        } else {
+            // Debug logging to help identify where we looked
+            log_to_file(app, &format!("Checked path (not found): {}", p.to_string_lossy()));
         }
     }
     
@@ -241,7 +252,7 @@ fn spawn_sidecar_process(app: &tauri::AppHandle) {
                   log_to_file(app, &format!("Spawning dev sidecar: {}", dev_path_str));
                   shell.command("node").args(&[dev_path_str])
              } else {
-                 log_to_file(app, "Could not find server script.");
+                 log_to_file(app, "Could not find server script in any standard location.");
                  return;
              }
         } else {

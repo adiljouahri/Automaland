@@ -36,4 +36,4 @@ logger.prototype.log = function (msg, event) {
     f.close();
   } catch (e) {}
 };
-var LOGGER = new logger("triPaneltApp");
+var LOGGER = new logger("AutomlandtApp");

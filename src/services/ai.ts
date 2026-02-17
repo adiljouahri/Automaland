@@ -3,7 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AutomationFlow, AIProvider, AppSettings, LogEntry } from "../types";
 
 const SYSTEM_INSTRUCTION = `
-You are the Senior Automation Architect for "TriPanel Automator".
+You are the Senior Automation Architect for "Automland Automator".
 Your job is to generate three strictly coupled panels of code based on a user request.
 
 ### THE ARCHITECTURE

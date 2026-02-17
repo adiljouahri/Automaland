@@ -1,7 +1,7 @@
 {
-  "name": "tripanel-sidecar",
+  "name": "automland-sidecar",
   "version": "1.0.0",
-  "description": "Node.js Sidecar for TriPanel Automator",
+  "description": "Node.js Sidecar for Automland Automator",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

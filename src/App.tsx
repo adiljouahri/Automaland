@@ -20,13 +20,13 @@ function App() {
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('app_settings');
     if (saved) return JSON.parse(saved);
-    return {
+     return {
       aiApiKey: '',
       aiProvider: 'gemini',
-      aiModel: 'gemini-3-pro-preview',
+      aiModel: 'gemini-3-flash',
       serverUrl: 'http://localhost:3001',
       strapiUrl: 'https://tripanelserver-9a123e242287.herokuapp.com',
-      theme: 'light'
+      theme: 'dark'
     };
   });
 
@@ -727,18 +727,25 @@ function App() {
 
   useEffect(() => {
       let mounted = true;
-      safeServerRequest('/api/adobe/apps')
-        .then(res => res.json())
-        .then(data => { if (mounted) setAvailableApps(data); })
-        .catch(() => {
-            if (mounted) {
-                setAvailableApps([
-                    { id: 'photoshop', name: 'Photoshop', specifier: 'photoshop' },
-                    { id: 'illustrator', name: 'Illustrator', specifier: 'illustrator' },
-                ]);
-            }
-        });
-      return () => { mounted = false; };
+      // Added 5 second delay to allow for native core loading as requested.
+      const timer = setTimeout(() => {
+        safeServerRequest('/api/host/apps')
+          .then(res => res.json())
+          .then(data => { if (mounted) setAvailableApps(data); })
+          .catch(() => {
+              if (mounted) {
+                  setAvailableApps([
+                      { id: 'photoshop', name: 'Photoshop', specifier: 'photoshop' },
+                      { id: 'illustrator', name: 'Illustrator', specifier: 'illustrator' },
+                  ]);
+              }
+          });
+      }, 5000);
+
+      return () => { 
+        mounted = false; 
+        clearTimeout(timer);
+      };
   }, [safeServerRequest]);
 
   const extractActions = (code: string) => {

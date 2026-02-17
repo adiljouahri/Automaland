@@ -5,8 +5,24 @@ const path = require('path');
 
 function copyFolderRecursive(src, dest) {
   try {
-    fs.cpSync(src, dest, { recursive: true, force: true });
+    // Ensure destination directory exists before copying
+    fs.ensureDirSync(dest);
+    
+    fs.copySync(src, dest, { 
+        overwrite: true, 
+        dereference: true,
+        filter: (src, dest) => {
+            // Optional: Filter logic if needed, currently allowing everything
+            return true;
+        }
+    });
     console.log(`Successfully copied folder from '${src}' to '${dest}'.`);
+    
+    // Debug: List files to ensure .node files are present
+    if (fs.existsSync(dest)) {
+        const files = fs.readdirSync(dest);
+        console.log(`Contents of ${dest}:`, files.slice(0, 10)); 
+    }
   } catch (err) {
     console.error(`Error copying folder: ${err.message}`);
     process.exit(1); 
@@ -38,18 +54,21 @@ async function bundle() {
     const srcLib = path.join(__dirname, 'lib');
     const destLib = path.join(__dirname, 'dist', 'lib');
     
-    // if (fs.existsSync(srcLib)) {
-    //     copyFolderRecursive(srcLib, destLib);
-    // } else {
-    //     console.warn("⚠️ 'lib' folder not found in server root.");
-    // }
+    if (fs.existsSync(srcLib)) {
+        // Explicitly ensure the destination folder exists
+        fs.ensureDirSync(destLib);
+        copyFolderRecursive(srcLib, destLib);
+    } else {
+        console.warn("⚠️ 'lib' folder not found in server root.");
+    }
 
     // --- COPY JSX FOLDER (Standard Scripts) ---
     console.log("📦 Copying JSX Folder...");
     const srcJsx = path.join(__dirname, 'jsx');
     const destJsx = path.join(__dirname, 'dist', 'jsx');
-    console.log(srcJsx)
+    
     if (fs.existsSync(srcJsx)) {
+        fs.ensureDirSync(destJsx);
         copyFolderRecursive(srcJsx, destJsx);
     } else {
         console.warn("⚠️ 'jsx' folder not found in server root. (Optional if not using custom standard libs)");
@@ -58,33 +77,28 @@ async function bundle() {
     console.log("✅ Build Complete: dist/server-sidecar.cjs");
 
     // --- AUTOMATIC COPY FOR TAURI DEV ---
+    // This helps when running 'npm run tauri dev'
     const debugTarget = path.resolve(__dirname, '../src-tauri/target/debug');
     
-    console.log(`⚡ Copying to Tauri Debug Target: ${debugTarget}`);
-    
-    try {
-        // Ensure directory exists
-        await fs.ensureDir(debugTarget);
+    // Only try copy if debug target exists (meaning we've run tauri dev/build at least once)
+    if (fs.existsSync(debugTarget)) {
+        console.log(`⚡ Copying to Tauri Debug Target: ${debugTarget}`);
+        try {
+            await fs.copy('dist/server-sidecar.cjs', path.join(debugTarget, 'server-sidecar.cjs'));
+            
+            const debugLib = path.join(debugTarget, 'lib');
+            if (fs.existsSync(destLib)) {
+                //  await fs.copy(destLib, debugLib, { overwrite: true });
+            }
 
-        // Copy the main JS bundle
-        await fs.copy('dist/server-sidecar.cjs', path.join(debugTarget, 'server-sidecar.cjs'));
-        
-        // Copy the full lib folder to the target as well
-        const debugLib = path.join(debugTarget, 'lib');
-        if (fs.existsSync(destLib)) {
-             copyFolderRecursive(destLib, debugLib);
+            const debugJsx = path.join(debugTarget, 'jsx');
+            if (fs.existsSync(destJsx)) {
+                 await fs.copy(destJsx, debugJsx, { overwrite: true });
+            }
+            console.log("   -> Copied successfully.");
+        } catch (e) {
+            console.warn("   -> Copy failed (Debug Target):", e.message);
         }
-
-        // Copy the full jsx folder to the target as well
-        const debugJsx = path.join(debugTarget, 'jsx');
-        if (fs.existsSync(destJsx)) {
-             copyFolderRecursive(destJsx, debugJsx);
-        }
-
-        console.log("   -> Copied successfully.");
-    } catch (e) {
-        console.warn("   -> Copy failed:", e.message);
-        console.warn("   -> You may need to run 'cargo build' once to create the target directory, or the file is locked.");
     }
 }
 

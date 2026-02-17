@@ -5,9 +5,9 @@ const fs = require("fs");
 const path = require("path");
 const process = require("process");
 const events = require("events");
-console.log('aaaaaaaaaaaaa')
-const FastXML = require("fast-xml-parser");
-console.log(FastXML)
+console.log('aaaaaaaaaaaaabbbbbbb')
+const {XMLParser} = require("fast-xml-parser");
+const  FastXML=new XMLParser();
 const XML_OPTIONS = {
     attributeNamePrefix: "@",
     ignoreAttributes: false,
@@ -22,10 +22,19 @@ class ExtendScriptFacade extends events.EventEmitter {
     constructor(libRoot) {
         super();
         this.libRoot = libRoot || __dirname;
+        
+        // Fix for Windows extended path prefix (\\?\\) which causes issues with native module loading
+        if (process.platform === "win32" && typeof this.libRoot === "string" && this.libRoot.startsWith("\\\\\\\\?\\\\")) {
+            this.libRoot = this.libRoot.replace(/^\\\\\\\\?\\\\/, "");
+        }
+
         this.core = null;
         this.isInitialized = false;
         this.pumpInterval = null;
         this.activeRequests = new Map();
+        
+        // Initialize parser (v4)
+        // this.xmlParser = new XMLParser(XML_OPTIONS);
 
         try {
             this.core = this._loadCore();
@@ -53,9 +62,8 @@ class ExtendScriptFacade extends events.EventEmitter {
 
         const fullPath = path.join(this.libRoot, relativePath);
         
-        console.log(\`[ExtendScriptFacade] Attempting to load native module from: \${fullPath}\`,fs.existsSync(fullPath));
-        console.log(!fs.existsSync(fullPath))
-        console.log(path.join(this.libRoot, "esdcorelibinterface.node"))
+        console.log(\`[ExtendScriptFacade] Attempting to load native module from: \${fullPath}\`);
+        
         if (!fs.existsSync(fullPath)) {
             const flatPath = path.join(this.libRoot, "esdcorelibinterface.node");
             if (fs.existsSync(flatPath)) {
@@ -63,10 +71,7 @@ class ExtendScriptFacade extends events.EventEmitter {
                 return require(flatPath);
             }
             throw new Error(\`Module file not found at: \${fullPath}\`);
-        }else{
-           console.log(\`[ExtendScriptFacade] Not found\`);
-  
-            }
+        }
 
         try {
             return require(fullPath);
@@ -79,7 +84,7 @@ class ExtendScriptFacade extends events.EventEmitter {
         }
     }
 
-    async initialize(specName = "tripanel-esd") {
+    async initialize(specName = "Automland-esd") {
         if (!this.core) return false;
         if (this.isInitialized) return true;
 
@@ -127,9 +132,11 @@ class ExtendScriptFacade extends events.EventEmitter {
     }
 
     getInstalledApps() {
+        console.log('this.core',this.core)
         if (!this.core) return [];
         try {
             const result = this.core.esdGetInstalledApplicationSpecifiers();
+            console.log(JSON.stringify(result))
             if (result.status !== 0) return [];
 
             return result.specifiers.map(spec => {
@@ -155,6 +162,7 @@ class ExtendScriptFacade extends events.EventEmitter {
     }
 
     async evaluate(appSpecifier, source, engineName = "main", timeoutMs = 5000, waitForResponse = true) {
+            console.log("parsed----->")
              if (!this.core) {
                 return "Simulation Mode: Adobe Bridge not active.";
             }
@@ -189,8 +197,9 @@ class ExtendScriptFacade extends events.EventEmitter {
                         try {
                             const parsed = FastXML.parse(msg.body, XML_OPTIONS);
                             console.log(parsed)
-                            resolve(parsed.evalresult['value']['#value']);
+                            resolve(parsed);
                         } catch (e) {
+                            console.log(e.message)
                             resolve(msg.body);
                         }
                     },

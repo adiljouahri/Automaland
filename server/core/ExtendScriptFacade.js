@@ -1,3 +1,4 @@
+
 "use strict";
 
 const fs = require("fs");
@@ -5,16 +6,6 @@ const path = require("path");
 const process = require("process");
 const events = require("events");
 const FastXML = require("fast-xml-parser");
-
-/**
- * Native library paths using the requested .node.js extension convention.
- * These are assumed to be located in the sidecar's lib directory.
- */
-const CORE_LIB_PATH = {
-    darwin: "../lib/esdebugger-core/mac/esdcorelibinterface.node",
-    win64: "../lib/esdebugger-core/win/x64/esdcorelibinterface.node",
-    win32: "../lib/esdebugger-core/win/win32/esdcorelibinterface.node"
-};
 
 const XML_OPTIONS = {
     attributeNamePrefix: "@",
@@ -25,13 +16,17 @@ const XML_OPTIONS = {
 
 /**
  * ExtendScriptFacade provides a high-level interface to the ExtendScript Debugger core.
- * It manages the lifecycle of the bridge and provides methods to evaluate code in creative apps.
  */
 class ExtendScriptFacade extends events.EventEmitter {
     constructor(libRoot) {
         super();
-        // Default to __dirname for dev mode if not provided, though passing explicit path is safer
         this.libRoot = libRoot || __dirname;
+        
+        // Fix for Windows extended path prefix (\\?\) which causes issues with native module loading
+        if (process.platform === "win32" && typeof this.libRoot === "string" && this.libRoot.startsWith("\\\\?\\")) {
+            this.libRoot = this.libRoot.replace(/^\\\\\?\\/, "");
+        }
+
         this.core = null;
         this.isInitialized = false;
         this.pumpInterval = null;
@@ -49,7 +44,6 @@ class ExtendScriptFacade extends events.EventEmitter {
         const arch = process.arch;
         let relativePath = "";
 
-        // Determine relative path to .node file inside the lib folder
         if (platform === "darwin") {
             relativePath = "esdebugger-core/mac/esdcorelibinterface.node";
         } else if (platform === "win32") {
@@ -62,14 +56,11 @@ class ExtendScriptFacade extends events.EventEmitter {
              throw new Error(`Platform ${platform} not supported.`);
         }
 
-        // Construct full path using the libRoot provided in constructor.
-        // This ensures we look in the 'lib' folder we copied manually in bundle.js.
         const fullPath = path.join(this.libRoot, relativePath);
         
         console.log(`[ExtendScriptFacade] Attempting to load native module from: ${fullPath}`);
         
         if (!fs.existsSync(fullPath)) {
-            // Check if fallback exists in root (rare case but good safety)
             const flatPath = path.join(this.libRoot, "esdcorelibinterface.node");
             if (fs.existsSync(flatPath)) {
                 console.log(`[ExtendScriptFacade] Found at fallback path: ${flatPath}`);
@@ -79,12 +70,9 @@ class ExtendScriptFacade extends events.EventEmitter {
         }
 
         try {
-            // Dynamic require to load the .node file.
-            // Since we copied the full folder structure, sibling DLLs should be found by the OS loader.
             return require(fullPath);
         } catch (e) {
             console.error(`[ExtendScriptFacade] Load error: ${e.message}`);
-            // On Windows, specific error 126 or 127 usually means missing DLL dependencies
             if (e.message.includes("specified module could not be found")) {
                 console.error("This usually means a dependency DLL (like esdcorelib.dll) is missing from the same directory.");
             }
@@ -92,10 +80,7 @@ class ExtendScriptFacade extends events.EventEmitter {
         }
     }
 
-    /**
-     * Initializes the bridge and starts the message pump
-     */
-    async initialize(specName = "tripanel-esd") {
+    async initialize(specName = "Automland-esd") {
         if (!this.core) return false;
         if (this.isInitialized) return true;
 
@@ -106,7 +91,6 @@ class ExtendScriptFacade extends events.EventEmitter {
 
         this.isInitialized = true;
 
-        // Start pumping messages (Required for async responses)
         this.pumpInterval = setInterval(() => {
             if (this.core) {
                 this.core.esdPumpSession((reason, message) => {
@@ -119,11 +103,9 @@ class ExtendScriptFacade extends events.EventEmitter {
     }
 
     _handleMessage(reason, message) {
-        // Reason 3 = Response, 4 = Error, 5 = Timeout
         if (this.activeRequests.has(message.serialNumber)) {
             const { resolve, reject } = this.activeRequests.get(message.serialNumber);
             if (reason === 3) {
-                // Parse XML body if necessary, or just return the raw message object
                 resolve(message);
             } else {
                 reject(new Error(`Message Error: ${message.body} (Reason: ${reason})`));
@@ -134,14 +116,9 @@ class ExtendScriptFacade extends events.EventEmitter {
             }
             return;
         }
-
-        // Emit for general events like prints (reason 1) or breaks
         this.emit("message", { reason, message });
     }
 
-    /**
-     * Shuts down the library and stops the pump
-     */
     destroy() {
         if (this.pumpInterval) clearInterval(this.pumpInterval);
         if (this.core) {
@@ -150,9 +127,6 @@ class ExtendScriptFacade extends events.EventEmitter {
         this.isInitialized = false;
     }
 
-    /**
-     * Returns a list of installed creative applications
-     */
     getInstalledApps() {
         if (!this.core) return [];
         try {
@@ -161,7 +135,6 @@ class ExtendScriptFacade extends events.EventEmitter {
 
             return result.specifiers.map(spec => {
                 const displayName = this.core.esdGetDisplayNameForApplication(spec).name || spec;
-                // Strip the word "Adobe" from the name for UI consistency as per guidelines
                 const cleanName = displayName.replace(/Adobe\s*/gi, '');
                 return {
                     specifier: spec,
@@ -175,9 +148,6 @@ class ExtendScriptFacade extends events.EventEmitter {
         }
     }
 
-    /**
-     * Compiles ExtendScript source to JSXBin
-     */
     compileToJSXBin(source, filePath = "", includePath = "") {
         if (!this.core) throw new Error("Native core unavailable");
         const result = this.core.esdCompileToJSXBin(source, filePath, includePath);
@@ -185,10 +155,6 @@ class ExtendScriptFacade extends events.EventEmitter {
         throw new Error(`Compilation failed: ${result.error || result.status}`);
     }
 
-    /**
-     * High-level: Evaluate script in a specific app/engine
-     * Uses the ESTK 3 Debugging Protocol XML format
-     */
     async evaluate(appSpecifier, source, engineName = "main", timeoutMs = 5000, waitForResponse = true) {
          if (!this.core) {
             return "Simulation Mode: Adobe Bridge not active.";
@@ -236,7 +202,6 @@ class ExtendScriptFacade extends events.EventEmitter {
             });
         });
     }
-
 }
 
 module.exports = ExtendScriptFacade;

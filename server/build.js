@@ -14,8 +14,8 @@ const platform = process.platform;
 const arch = process.arch;
 
 let target = '';
-// MUST match the sidecar name in main.rs (tripanel-sidecar)
-let outputBase = 'tripanel-sidecar'; 
+// MUST match the sidecar name in main.rs (automland-sidecar)
+let outputBase = 'automland-sidecar'; 
 let outputFilename = outputBase;
 
 // Map Node.js platform/arch to Rust/Tauri Triple

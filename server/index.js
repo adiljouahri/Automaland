@@ -1,5 +1,4 @@
 
-
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -9,6 +8,10 @@ const vm = require('vm');
 const chokidar = require('chokidar');
 const axios = require('axios');
 const archiver = require('archiver');
+// Force bundler to include fast-xml-parser
+const FastXMLParserLib = require('fast-xml-parser');
+const EventEmitter = require('events');
+
 // REMOVED STATIC IMPORT: const ExtendScriptFacade = require('./core/ExtendScriptFacade');
 
 const app = express();
@@ -16,7 +19,7 @@ const app = express();
 let PORT = 3001; 
 
 // --- Setup Logging paths ---
-const USER_DATA_DIR = path.join(require('os').homedir(), '.tripanel');
+const USER_DATA_DIR = path.join(require('os').homedir(), '.Automland');
 const LOGS_DIR = path.join(USER_DATA_DIR, 'logs');
 fs.ensureDirSync(LOGS_DIR);
 const SERVER_LOG_PATH = path.join(LOGS_DIR, 'server.log');
@@ -181,7 +184,14 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // --- Initialization ---
 const GLOBAL_STATE = {};
-const libPath = path.join(__dirname, 'lib');
+let libPath = path.join(__dirname, 'lib');
+
+// Fix: Remove Windows extended path prefix (\\?\) which causes issues with native module loading
+if (process.platform === 'win32' && libPath.startsWith('\\\\?\\')) {
+    libPath = libPath.replace(/^\\\\\?\\/, '');
+}
+
+console.log(`[Sidecar] Library path set to: ${libPath}`);
 
 // Dynamic Bridge State
 let hostBridge = null;
@@ -199,7 +209,21 @@ async function ensureBridge(adapterCode) {
     try {
         console.log("[Sidecar] Compiling Adapter Code...");
         const sandbox = {
-            require: require,
+            require: (moduleName) => {
+                // Intercept fast-xml-parser to serve the bundled instance
+                if (moduleName === 'fast-xml-parser') return FastXMLParserLib;
+                
+                // Allow standard node modules
+                if (moduleName === 'fs') return fs;
+                if (moduleName === 'path') return path;
+                if (moduleName === 'events') return EventEmitter;
+                if (moduleName === 'process') return process;
+                
+                try { return require(moduleName); } catch(e) { 
+                    console.error(`[Sandbox] Failed to require: ${moduleName}`);
+                    return null; 
+                }
+            },
             console: console,
             process: process,
             Buffer: Buffer,
@@ -237,11 +261,11 @@ async function ensureBridge(adapterCode) {
             }
         });
 
-        const success = await hostBridge.initialize("tripanel-sidecar");
+        const success = await hostBridge.initialize("Automland-sidecar");
         if (success === true) {
             bridgeReady = true;
             installedApps = hostBridge.getInstalledApps();
-            console.log("[Sidecar] Host Bridge Ready.",installedApps.map(r=>r?.name));
+            console.log("[Sidecar] Host Bridge Ready.");
         } else {
             console.warn("[Sidecar] Host Bridge did not initialize (Simulation Mode).");
             bridgeReady = false;
@@ -311,7 +335,7 @@ logger.prototype.log = function (msg, event) {
       $.writeln("Logger Error: " + e.message);
   }
 };
-var LOGGER = new logger("triPaneltApp");
+var LOGGER = new logger("AutomlandtApp");
 ` 
     },
     { 
@@ -335,6 +359,7 @@ requestHandler.prototype = {
         return req;
     }
     return res;
+    // ...
   },
   toString: function (res) {
     try {
@@ -395,8 +420,8 @@ libsToSync.forEach(lib => {
 });
 
 const CORE_CONTENT = `
-// TriPanel Core Wrapper
-function __tripanel_wrap__(userFunc) {
+// Automland Core Wrapper
+function __Automland_wrap__(userFunc) {
     try {
         LOGGER.log("Starting Execution...");
         
@@ -528,7 +553,7 @@ var triggerData = (rawTrigger === null || typeof rawTrigger === 'undefined') ? {
 ${appCode || '// No Host App Code provided'}
 // ----------------------------------
 
-__tripanel_wrap__(function() {
+__Automland_wrap__(function() {
     ${jsxCode}
 });
             `;
@@ -542,17 +567,20 @@ __tripanel_wrap__(function() {
                 // Ensure bridge is ready. (Normally handled by ensureBridge on request)
                 if (hostBridge) {
                     const resultRaw = await hostBridge.evaluate(appToUse, finalJsx, "main", timeout, true);
-                    
+                    console.log('resultRaw',resultRaw)
+                    console.log('resultRaw',typeof resultRaw)
                     // When receiving data BACK from ExtendScript, we expect valid JSON 
-                    // because __tripanel_wrap__ uses JSON.stringify.
+                    // because __Automland_wrap__ uses JSON.stringify.
                     let jsonResult;
                     try {
-                        jsonResult = JSON.parse(resultRaw);
+                        jsonResult = JSON.parse((resultRaw).evalresult['value']);
                     } catch (parseErr) {
                         console.error("Failed to parse app response:", resultRaw);
                         throw new Error(`Invalid JSON returned from app: ${resultRaw}`);
                     }
-    
+                    console.log(jsonResult)
+                    console.log(typeof jsonResult)
+                    console.log(jsonResult.success)
                     if (jsonResult.success) {
                         return jsonResult.data;
                     } else {
@@ -758,7 +786,7 @@ app.get('/api/auth/callback', async (req, res) => {
 
     // Fallback if still null
     if (!parsedUser) {
-        parsedUser = { username: 'Visitor', id: 0, email: 'loading@tripanel.app' };
+        parsedUser = { username: 'Visitor', id: 0, email: 'loading@Automland.app' };
     }
     
     try {
@@ -799,8 +827,7 @@ app.get('/api/auth/callback', async (req, res) => {
     }
 });
 
-app.get('/api/adobe/apps', async (req, res) => {
-    console.log('bridgeReady',bridgeReady)
+app.get('/api/host/apps', async (req, res) => {
     if (!bridgeReady) {
         return res.json([
             { id: 'photoshop', name: 'Photoshop (Simulated)', specifier: 'photoshop' },
@@ -808,7 +835,6 @@ app.get('/api/adobe/apps', async (req, res) => {
             { id: 'indesign', name: 'InDesign (Simulated)', specifier: 'indesign' }
         ]);
     }
-    
     res.json(hostBridge.getInstalledApps());
 });
 

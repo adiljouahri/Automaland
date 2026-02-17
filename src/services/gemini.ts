@@ -2,7 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AutomationFlow } from "../types";
 
 const SYSTEM_INSTRUCTION = `
-You are an expert Senior Automation Architect for the "TriPanel Automator" app.
+You are an expert Senior Automation Architect for the "Automland Automator" app.
 This app orchestrates workflows using three distinct panels:
 1. UI Panel: JSON Schema (Draft 7) for user input forms.
 2. Node.js Panel: Server-side logic using standard Node modules + a 'utils' helper.
