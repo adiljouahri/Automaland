@@ -25,8 +25,8 @@ function App() {
       aiProvider: 'gemini',
       aiModel: 'gemini-3-pro-preview',
       serverUrl: 'http://localhost:3001',
-      strapiUrl: 'http://localhost:1337',
-      theme: 'dark'
+      strapiUrl: 'https://tripanelserver-9a123e242287.herokuapp.com',
+      theme: 'light'
     };
   });
 
@@ -349,33 +349,12 @@ function App() {
                         addLog(`Logged in as ${u.username}`, "SYSTEM", "success");
                     } catch(validationErr: any) {
                          // Token was returned but Strapi rejected it. 
-                         // It might be an access_token that needs exchanging (like in manual mode).
-                         console.warn("Direct Validation Failed. Attempting Token Exchange...", validationErr);
-                         
-                         try {
-                             const cleanStrapiUrl = settings.strapiUrl.replace(/\/$/, "");
-                             const exchangeUrl = `${cleanStrapiUrl}/api/auth/google/callback?access_token=${receivedToken}`;
-                             const exRes = await fetch(exchangeUrl);
-                             const exData = await exRes.json();
-                             
-                             if (exData.jwt && exData.user) {
-                                 strapi.setToken(exData.jwt);
-                                 setUser(exData.user);
-                                 setIsPollingAuth(false);
-                                 setIsAuthLoading(false);
-                                 setAuthError(null);
-                                 addLog(`Logged in as ${exData.user.username}`, "SYSTEM", "success");
-                             } else {
-                                 throw new Error("Exchange failed");
-                             }
-                         } catch (exErr) {
-                             console.error("Token exchange failed:", exErr);
-                             setAuthError(`Authentication Failed. The token was received but invalid.`);
-                             strapi.logout();
-                             setIsPollingAuth(false);
-                             setIsAuthLoading(false);
-                             setShowManualToken(true);
-                         }
+                         console.warn("Direct Validation Failed.", validationErr);
+                         setAuthError(`Authentication Failed. The token was received but invalid.`);
+                         strapi.logout();
+                         setIsPollingAuth(false);
+                         setIsAuthLoading(false);
+                         setShowManualToken(true);
                     }
                 } else if (authState.status === 'error') {
                     // Server reported an error from the callback (e.g. Strapi failed to create user)
@@ -685,19 +664,6 @@ function App() {
      addLog(`Created local copy.`, "SYSTEM", "success");
   };
 
-  // ... (Login functions remain same)
-
-  const handleGoogleLogin = async () => {
-      setAuthError(null);
-      const cleanStrapiUrl = settings.strapiUrl.replace(/\/$/, "");
-      const sidecarCallback = `${settings.serverUrl}/api/auth/callback?strapiUrl=${encodeURIComponent(cleanStrapiUrl)}`;
-      console.log("[Auth] Starting Google Login. Callback:", sidecarCallback);
-      const url = `${cleanStrapiUrl}/api/connect/google?callback=${encodeURIComponent(sidecarCallback)}`;
-      setIsAuthLoading(true);
-      setIsPollingAuth(true);
-      try { await open(url); } catch (e) { window.location.href = url; }
-  };
-
   const handleManualTokenLogin = async () => {
       if (!manualToken.trim()) return;
       setIsAuthLoading(true);
@@ -708,32 +674,13 @@ function App() {
           const u = await strapi.getMe();
           setUser(u);
           addLog(`Logged in manually as ${u.username}`, "SYSTEM", "success");
+      } catch (e: any) {
+           console.error("Manual Token Validation Failed:", e);
+           setAuthError(`Invalid Token: ${e.message}`);
+           strapi.logout();
+      } finally {
           setIsAuthLoading(false);
           setIsPollingAuth(false);
-          return;
-      } catch (e: any) {
-          console.warn("Standard JWT validation failed. Attempting Provider Token Exchange...", e.message);
-      }
-      try {
-          const cleanStrapiUrl = settings.strapiUrl.replace(/\/$/, "");
-          const exchangeUrl = `${cleanStrapiUrl}/api/auth/google/callback?access_token=${token}`;
-          const res = await fetch(exchangeUrl);
-          const data = await res.json();
-          if (data.jwt && data.user) {
-              strapi.setToken(data.jwt);
-              setUser(data.user);
-              addLog(`exchanged Google Token for User: ${data.user.username}`, "SYSTEM", "success");
-              setIsAuthLoading(false);
-              setIsPollingAuth(false);
-          } else {
-              throw new Error(data.error?.message || "Token exchange failed");
-          }
-      } catch (exchangeErr: any) {
-           console.error("Manual Token Exchange Failed:", exchangeErr);
-           setAuthError(`Invalid Token. If this is a Google Token, Strapi rejected it: ${exchangeErr.message}`);
-           strapi.logout();
-           setIsAuthLoading(false);
-           setIsPollingAuth(false);
       }
   };
 
@@ -1128,21 +1075,6 @@ ${result.analysis}
                     <input type="text" placeholder="Identifier" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.identifier} onChange={e => setAuthData({...authData, identifier: e.target.value})} />
                     <input type="password" placeholder="Password" className={`w-full p-3 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} value={authData.password} onChange={e => setAuthData({...authData, password: e.target.value})} />
                     <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-all">{authMode === 'login' ? 'Login' : 'Register'}</button>
-                    
-                    <div className="relative flex py-2 items-center">
-                        <div className={`flex-grow border-t ${borderPrimary}`}></div>
-                        <span className={`flex-shrink mx-4 text-xs ${textSecondary}`}>OR</span>
-                        <div className={`flex-grow border-t ${borderPrimary}`}></div>
-                    </div>
-                    
-                    <button 
-                        type="button" 
-                        onClick={handleGoogleLogin}
-                        className={`w-full flex items-center justify-center gap-2 py-3 rounded-lg border transition-all ${isDark ? 'bg-white text-slate-800 hover:bg-slate-100' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-                    >
-                        <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" /><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" /><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.26.81-.58z" /><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" /></svg>
-                        Continue with Google
-                    </button>
                 </form>
                 <div className="flex justify-between mt-4">
                     <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="text-sm text-blue-500 hover:underline">{authMode === 'login' ? "New here? Register" : "Have an account? Login"}</button>
