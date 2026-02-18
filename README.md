@@ -3,7 +3,7 @@
 
 The AI-native automation platform for Creative Professionals. Design, prompt, and orchestrate Host App & Node.js workflows using a unique TriPanel architecture.
 
-**[🌐 Visit Website](https://automaland.com/)**
+**[🌐 Download](https://automaland.com/)**
 
 ![Automaland Hero](https://adilouahri.gumroad.com/l/automaland)
 
