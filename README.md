@@ -5,8 +5,6 @@ The AI-native automation platform for Creative Professionals. Design, prompt, an
 
 **[🌐 Download](https://automaland.com/)**
 
-[Help Automaland](https://adiljouahri.gumroad.com/l/automaland)
-
 ## 🚀 Overview
 
 Automaland replaces complex visual node graphs with a streamlined execution model split into three coupled layers:
@@ -92,7 +90,7 @@ Output: `src-tauri/target/release/bundle/dmg/`
 
 Building Automaland requires hundreds of hours of coding and caffeine. If this tool saves you time in your daily workflow or powers your business, consider fueling the next update! Your support helps cover server costs and keeps the project open-source.
 
-<a href="https://gumroad.com/l/YOUR_PRODUCT_LINK">
+<a href="https://adiljouahri.gumroad.com/l/automaland">
   <img src="https://img.shields.io/badge/Support%20on-Gumroad-ff90e8?style=for-the-badge&logo=gumroad&logoColor=000" alt="Support on Gumroad" height="40" />
 </a>
 
