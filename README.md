@@ -5,7 +5,7 @@ The AI-native automation platform for Creative Professionals. Design, prompt, an
 
 **[🌐 Download](https://automaland.com/)**
 
-![Automaland Hero](https://adilouahri.gumroad.com/l/automaland)
+![Help Automaland](https://adiljouahri.gumroad.com/l/automaland)
 
 ## 🚀 Overview
 
