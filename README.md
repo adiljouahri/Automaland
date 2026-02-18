@@ -5,7 +5,7 @@ The AI-native automation platform for Creative Professionals. Design, prompt, an
 
 **[🌐 Download](https://automaland.com/)**
 
-![Help Automaland](https://adiljouahri.gumroad.com/l/automaland)
+[Help Automaland](https://adiljouahri.gumroad.com/l/automaland)
 
 ## 🚀 Overview
 
@@ -107,8 +107,9 @@ The Node.js sidecar (`server/`) runs as a background process managed by Tauri. I
 *   **Local**: Flows are stored in `flows.db` (SQLite) within the OS AppData directory.
 *   **Cloud (Optional)**: Configure a Strapi URL in Settings to sync flows to a team server.
 
+
 ## ⚠️ Disclaimer
-Automaland is an independent software tool. It is not affiliated with, endorsed by, authorized by, sponsored by, or in any way officially connected with Adobe Inc. or its subsidiaries. The names Photoshop, Illustrator, InDesign, and Premiere Pro are registered trademarks of their respective owners.
+Automaland is an independent software tool. It is not affiliated with, endorsed by, authorized by, sponsored by, or in any way officially connected with the software vendors of the supported host applications or their subsidiaries. The names Photoshop, Illustrator, InDesign, and Premiere Pro are registered trademarks of their respective owners.
 
 ## 📄 License
 MIT License. See [LICENSE](LICENSE) for details.
