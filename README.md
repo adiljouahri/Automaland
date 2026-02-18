@@ -109,5 +109,3 @@ The Node.js sidecar (`server/`) runs as a background process managed by Tauri. I
 ## ⚠️ Disclaimer
 Automaland is an independent software tool. It is not affiliated with, endorsed by, authorized by, sponsored by, or in any way officially connected with the software vendors of the supported host applications or their subsidiaries. The names Photoshop, Illustrator, InDesign, and Premiere Pro are registered trademarks of their respective owners.
 
-## 📄 License
-MIT License. See [LICENSE](LICENSE) for details.
