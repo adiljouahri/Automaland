@@ -6,8 +6,9 @@ const path = require("path");
 const process = require("process");
 const events = require("events");
 console.log('aaaaaaaaaaaaabbbbbbb')
-const {XMLParser} = require("fast-xml-parser");
-const  FastXML=new XMLParser();
+const FastXML = require('fast-xml-parser');
+console.log('FastXML',FastXML)
+// // const  FastXML=new XMLParser();
 const XML_OPTIONS = {
     attributeNamePrefix: "@",
     ignoreAttributes: false,
@@ -132,7 +133,6 @@ class ExtendScriptFacade extends events.EventEmitter {
     }
 
     getInstalledApps() {
-        console.log('this.core',this.core)
         if (!this.core) return [];
         try {
             const result = this.core.esdGetInstalledApplicationSpecifiers();
@@ -162,7 +162,6 @@ class ExtendScriptFacade extends events.EventEmitter {
     }
 
     async evaluate(appSpecifier, source, engineName = "main", timeoutMs = 5000, waitForResponse = true) {
-            console.log("parsed----->")
              if (!this.core) {
                 return "Simulation Mode: Adobe Bridge not active.";
             }
@@ -196,10 +195,10 @@ class ExtendScriptFacade extends events.EventEmitter {
                         clearTimeout(timeoutId);
                         try {
                             const parsed = FastXML.parse(msg.body, XML_OPTIONS);
-                            console.log(parsed)
-                            resolve(parsed);
+                            resolve(parsed.evalresult['value']['#value']);
                         } catch (e) {
-                            console.log(e.message)
+                            console.log('err10',e)
+
                             resolve(msg.body);
                         }
                     },

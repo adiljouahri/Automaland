@@ -192,6 +192,7 @@ class ExtendScriptFacade extends events.EventEmitter {
                         console.log(parsed)
                         resolve(parsed.evalresult['value']['#value']);
                     } catch (e) {
+                        console.log('err10',e)
                         resolve(msg.body);
                     }
                 },
