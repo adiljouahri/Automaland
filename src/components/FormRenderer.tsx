@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { JSONSchema } from '../types';
-import { FileJson, Code, Eye, AlertTriangle, PlayCircle, Type, Hash, CheckSquare, List, Key, Copy, FolderOpen, FileSearch } from 'lucide-react';
+import { FileJson, Code, Eye, AlertTriangle, PlayCircle, Type, Hash, CheckSquare, List, Key, Copy, FolderOpen, FileSearch, Trash2 } from 'lucide-react';
 import { CodeEditor } from './CodeEditor';
 
 interface FormRendererProps {
@@ -12,6 +12,8 @@ interface FormRendererProps {
   actions?: string[];
   onRunAction?: (actionName: string) => void;
   onInjectSnippet?: (type: 'file_browser' | 'folder_browser') => void;
+  onBrowse?: (key: string, type: 'file' | 'folder') => void;
+  onRemoveField?: (key: string) => void;
   isRunning?: boolean;
 }
 
@@ -24,6 +26,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   actions = [],
   onRunAction,
   onInjectSnippet,
+  onBrowse,
+  onRemoveField,
   isRunning = false
 }) => {
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
@@ -66,7 +70,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const injectField = (type: 'string' | 'number' | 'boolean' | 'enum' | 'file') => {
+  const injectField = (type: 'string' | 'number' | 'boolean' | 'enum' | 'file' | 'folder') => {
     try {
         let current: any;
         try {
@@ -100,7 +104,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 break;
             case 'file':
                 keyName = `file_${timestamp}`;
-                newField = { type: "string", title: "File Path", description: "Path to a file or folder", default: "./" };
+                newField = { type: "string", title: "File Path", description: "Path to a file", default: "./", format: "file" };
+                break;
+            case 'folder':
+                keyName = `folder_${timestamp}`;
+                newField = { type: "string", title: "Folder Path", description: "Path to a folder", default: "./", format: "folder" };
                 break;
         }
 
@@ -109,6 +117,22 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     } catch (e) {
         alert("Cannot inject field: Invalid JSON currently in editor.");
     }
+  };
+
+  const handleRemoveField = (keyToRemove: string) => {
+      if (onRemoveField) {
+          onRemoveField(keyToRemove);
+          return;
+      }
+      try {
+          const current = JSON.parse(schemaStr);
+          if (current.properties && current.properties[keyToRemove]) {
+              delete current.properties[keyToRemove];
+              onSchemaChange(JSON.stringify(current, null, 2));
+          }
+      } catch (e) {
+          console.error("Failed to remove field", e);
+      }
   };
 
   const containerBorder = isDark ? "border-slate-700" : "border-slate-200";
@@ -152,21 +176,38 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       </div>
       
       {/* TOOLBAR */}
-      <div className={`flex items-center gap-1 px-3 py-2 border-b ${headerBorder} ${isDark ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-            <span className="text-[10px] uppercase font-bold text-slate-500 mr-2">Add:</span>
-            <button onClick={() => injectField('string')} title="Add Text Input" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><Type className="w-3.5 h-3.5" /></button>
-            <button onClick={() => injectField('number')} title="Add Number Input" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><Hash className="w-3.5 h-3.5" /></button>
-            <button onClick={() => injectField('boolean')} title="Add Checkbox" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><CheckSquare className="w-3.5 h-3.5" /></button>
-            <button onClick={() => injectField('enum')} title="Add Dropdown" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}><List className="w-3.5 h-3.5" /></button>
+      <div className={`flex flex-col gap-2 px-3 py-2 border-b ${headerBorder} ${isDark ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
+            <div className="flex items-center gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-500 mr-2 w-10 shrink-0">Basic:</span>
+                <button onClick={() => injectField('string')} title="Add Text Input" className={`flex items-center gap-1 p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}>
+                    <Type className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-medium">Text</span>
+                </button>
+                <button onClick={() => injectField('number')} title="Add Number Input" className={`flex items-center gap-1 p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}>
+                    <Hash className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-medium">Number</span>
+                </button>
+                <button onClick={() => injectField('boolean')} title="Add Checkbox" className={`flex items-center gap-1 p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}>
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-medium">Check</span>
+                </button>
+                <button onClick={() => injectField('enum')} title="Add Dropdown" className={`flex items-center gap-1 p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}>
+                    <List className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-medium">Select</span>
+                </button>
+            </div>
             
-            <div className={`w-px h-4 mx-1 ${isDark ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
-            
-            <button onClick={() => onInjectSnippet && onInjectSnippet('file_browser')} title="Add File Picker" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
-                <FileSearch className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={() => onInjectSnippet && onInjectSnippet('folder_browser')} title="Add Folder Picker" className={`p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
-                <FolderOpen className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-500 mr-2 w-10 shrink-0">Files:</span>
+                <button onClick={() => onInjectSnippet && onInjectSnippet('file_browser')} title="Add File Picker" className={`flex items-center gap-1 p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
+                    <FileSearch className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-medium">File</span>
+                </button>
+                <button onClick={() => onInjectSnippet && onInjectSnippet('folder_browser')} title="Add Folder Picker" className={`flex items-center gap-1 p-1.5 rounded transition-colors ${isDark ? 'hover:bg-purple-900/30 text-purple-400' : 'hover:bg-purple-50 text-purple-600'}`}>
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-medium">Folder</span>
+                </button>
+            </div>
       </div>
 
       <div className={`flex-1 overflow-hidden relative ${contentBg} flex flex-col`}>
@@ -201,6 +242,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                         const isEnum = Array.isArray(prop.enum);
                         const isBool = fieldType === 'boolean';
                         const isNum = fieldType === 'integer' || fieldType === 'number';
+                        const isFile = prop.format === 'file';
+                        const isFolder = prop.format === 'folder';
 
                         return (
                         <div key={key} className="flex flex-col gap-1.5 group relative">
@@ -209,17 +252,26 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                                     {prop.title || key}
                                 </label>
                                 
-                                <button 
-                                    onClick={() => handleCopyKey(key, prop)}
-                                    className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-all opacity-0 group-hover:opacity-100
-                                    ${copiedKey === key 
-                                        ? 'bg-green-500/10 border-green-500 text-green-500' 
-                                        : (isDark ? 'bg-slate-800 border-slate-700 text-slate-500 hover:text-blue-400' : 'bg-slate-100 border-slate-300 text-slate-500 hover:text-blue-600')}`}
-                                    title={`Key: "${key}" - Click to copy Node.js setUI code`}
-                                >
-                                    {copiedKey === key ? <Copy className="w-3 h-3" /> : <Key className="w-3 h-3" />}
-                                    <span className="font-mono">{key}</span>
-                                </button>
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                        onClick={() => handleCopyKey(key, prop)}
+                                        className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-all
+                                        ${copiedKey === key 
+                                            ? 'bg-green-500/10 border-green-500 text-green-500' 
+                                            : (isDark ? 'bg-slate-800 border-slate-700 text-slate-500 hover:text-blue-400' : 'bg-slate-100 border-slate-300 text-slate-500 hover:text-blue-600')}`}
+                                        title={`Key: "${key}" - Click to copy Node.js setUI code`}
+                                    >
+                                        {copiedKey === key ? <Copy className="w-3 h-3" /> : <Key className="w-3 h-3" />}
+                                        <span className="font-mono">{key}</span>
+                                    </button>
+                                    <button
+                                        onClick={() => handleRemoveField(key)}
+                                        className={`p-1 rounded border transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500 hover:text-red-400 hover:border-red-500/50' : 'bg-slate-100 border-slate-300 text-slate-500 hover:text-red-500 hover:border-red-300'}`}
+                                        title="Remove Field"
+                                    >
+                                        <Trash2 className="w-3 h-3" />
+                                    </button>
+                                </div>
                             </div>
                             
                             {prop.description && (
@@ -228,7 +280,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
                             {isEnum ? (
                                 <select
-                                value={formData[key] || prop.default || ''}
+                                value={formData[key] !== undefined ? formData[key] : (prop.default || '')}
                                 onChange={(e) => handleChange(key, e.target.value)}
                                 className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
                                 >
@@ -241,7 +293,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                                 <div className="flex items-center gap-2 mt-1">
                                     <input
                                         type="checkbox"
-                                        checked={formData[key] || prop.default || false}
+                                        checked={formData[key] !== undefined ? formData[key] : (prop.default || false)}
                                         onChange={(e) => handleChange(key, e.target.checked)}
                                         className={`w-4 h-4 rounded ${inputBorder} ${inputBg} text-blue-500 focus:ring-blue-500`}
                                     />
@@ -250,19 +302,30 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                             ) : isNum ? (
                                 <input
                                 type="number"
-                                value={formData[key] || prop.default || ''}
+                                value={formData[key] !== undefined ? formData[key] : (prop.default || '')}
                                 onChange={(e) => handleChange(key, Number(e.target.value))}
                                 className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
                                 placeholder="0"
                                 />
                             ) : (
-                                <input
-                                type="text"
-                                value={formData[key] || prop.default || ''}
-                                onChange={(e) => handleChange(key, e.target.value)}
-                                className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
-                                placeholder={key.toLowerCase().includes('path') ? '/path/to/...' : 'Enter text...'}
-                                />
+                                <div className="flex gap-2">
+                                    <input
+                                    type="text"
+                                    value={formData[key] !== undefined ? formData[key] : (prop.default || '')}
+                                    onChange={(e) => handleChange(key, e.target.value)}
+                                    className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                                    placeholder={key.toLowerCase().includes('path') ? '/path/to/...' : 'Enter text...'}
+                                    />
+                                    {(isFile || isFolder) && (
+                                        <button 
+                                            onClick={() => onBrowse && onBrowse(key, isFile ? 'file' : 'folder')}
+                                            className={`px-3 py-2 rounded border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-300 hover:bg-slate-50 text-slate-700'} transition-colors`}
+                                            title={isFile ? "Browse File" : "Browse Folder"}
+                                        >
+                                            {isFile ? <FileSearch className="w-4 h-4" /> : <FolderOpen className="w-4 h-4" />}
+                                        </button>
+                                    )}
+                                </div>
                             )}
                         </div>
                     )})

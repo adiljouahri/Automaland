@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Play, MessageSquare, Cpu, Image as ImageIcon, Settings, RefreshCw, Plus, Download, Trash2, List, Zap, Sun, Moon, LayoutGrid, Edit3, LogOut, User as UserIcon, Globe, Lock, Share2, Loader2, CloudUpload, Import, History, Clock, Undo, Eye, FileJson, AlertOctagon, Key, CheckSquare, Square, ShieldCheck, Flag, Bell, ExternalLink, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core'; // Import invoke from Tauri
-import { save, ask } from '@tauri-apps/plugin-dialog';
+import { save, ask, open as openDialog } from '@tauri-apps/plugin-dialog';
 import { open } from '@tauri-apps/plugin-shell';
 import { CodeEditor } from './components/CodeEditor';
 import { FormRenderer } from './components/FormRenderer';
@@ -20,7 +20,7 @@ function App() {
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('app_settings');
     if (saved) return JSON.parse(saved);
-     return {
+    return {
       aiApiKey: '',
       aiProvider: 'gemini',
       aiModel: 'gemini-3-flash',
@@ -196,6 +196,7 @@ function App() {
   const [formData, setFormData] = useState<Record<string, any>>({});
   
   const [chatInput, setChatInput] = useState('');
+  const [flowSearch, setFlowSearch] = useState('');
   // Context inclusion state
   const [includeContext, setIncludeContext] = useState(true);
   
@@ -920,14 +921,15 @@ ${result.analysis}
     if (!activeFlow) return;
     const timestamp = Date.now().toString().slice(-4);
     const key = type === 'file_browser' ? `filePath_${timestamp}` : `folderPath_${timestamp}`;
-    const actionName = type === 'file_browser' ? `browse_file_${timestamp}` : `browse_folder_${timestamp}`;
+    const actionName = `browse_${key}`;
     try {
         const newSchema = JSON.parse(activeFlow.uiSchema);
         if (!newSchema.properties) newSchema.properties = {};
         newSchema.properties[key] = { 
             type: "string", 
             title: type === 'file_browser' ? "Select File" : "Select Folder", 
-            default: "" 
+            default: "",
+            format: type === 'file_browser' ? "file" : "folder"
         };
         const newSchemaStr = JSON.stringify(newSchema, null, 2);
         let newAppCode = activeFlow.appCode;
@@ -938,12 +940,71 @@ ${result.analysis}
             newAppCode += `\n\nfunction selectfile() {\n  var fold = File.openDialog("Select File");\n  if (fold) return fold.fsName.replace(/\\\\/g, "/");\n  return "Error";\n}`;
         }
         const jsFunction = type === 'file_browser' ? 'return selectfile()' : 'return selectfolder()';
-        const newNodeCode = activeFlow.nodeCode + `\n\n// Action: Browse ${type === 'file_browser' ? 'File' : 'Folder'}\nexports.${actionName} = async () => {\n  const result = await $.run_jsx('${jsFunction}');\n  if (result && result !== "Error") {\n    utils.setUI('${key}', result);\n  }\n};`;
+        const newNodeCode = activeFlow.nodeCode + `\n\n// Action: Browse ${type === 'file_browser' ? 'File' : 'Folder'} (${key})\nexports.${actionName} = async () => {\n  const result = await $.run_jsx('${jsFunction}');\n  if (result && result !== "Error") {\n    utils.setUI('${key}', result);\n  }\n};`;
         updateActiveFlow({ uiSchema: newSchemaStr, appCode: newAppCode, nodeCode: newNodeCode });
         addLog(`Injected ${type === 'file_browser' ? 'File' : 'Folder'} Picker Snippet`, "SYSTEM", "success");
     } catch (e: any) {
         addLog(`Snippet injection failed: ${e.message}`, "SYSTEM", "error");
     }
+  };
+
+  const handleRemoveField = (key: string) => {
+      if (!activeFlow) return;
+      try {
+          const currentSchema = JSON.parse(activeFlow.uiSchema);
+          if (currentSchema.properties && currentSchema.properties[key]) {
+              delete currentSchema.properties[key];
+              const newSchemaStr = JSON.stringify(currentSchema, null, 2);
+              
+              let newNodeCode = activeFlow.nodeCode;
+              const actionName = `browse_${key}`;
+              
+              // Robustly remove the associated action code block
+              // Matches:
+              // 1. Optional comment line: // Action: Browse ... (key)
+              // 2. The export assignment: exports.browse_key = async ...
+              // 3. The function body up to the closing };
+              
+              // Strategy: Match the comment (if present) and the function definition
+              // We use [\s\S]*? to match the body non-greedily until the closing };
+              // We assume standard formatting as injected, but allow for some variation.
+              
+              const codeBlockRegex = new RegExp(
+                  `(\\/\\/ Action: Browse .* \\(${key}\\)\\s*)?` + 
+                  `exports\\.${actionName}\\s*=\\s*async\\s*\\(\\)\\s*=>\\s*\\{[\\s\\S]*?\\};`, 
+                  'g'
+              );
+              
+              newNodeCode = newNodeCode.replace(codeBlockRegex, '');
+              
+              // Clean up resulting double/triple newlines
+              newNodeCode = newNodeCode.replace(/\n{3,}/g, '\n\n');
+
+              updateActiveFlow({ uiSchema: newSchemaStr, nodeCode: newNodeCode });
+              addLog(`Removed field "${key}"`, "SYSTEM", "info");
+          }
+      } catch (e: any) {
+          addLog(`Failed to remove field: ${e.message}`, "SYSTEM", "error");
+      }
+  };
+
+  const handleBrowse = async (key: string, type: 'file' | 'folder') => {
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+          try {
+              const selected = await openDialog({
+                  directory: type === 'folder',
+                  multiple: false,
+                  recursive: true
+              });
+              if (selected && typeof selected === 'string') {
+                  setFormData(prev => ({ ...prev, [key]: selected }));
+              }
+          } catch (e) {
+              console.error(e);
+          }
+      } else {
+          alert("Native file browsing is only supported in the Desktop App. Please enter the path manually.");
+      }
   };
 
   const handleRun = async (entryPoint: string = 'run', specificFlow?: AutomationFlow) => {
@@ -977,6 +1038,11 @@ ${result.analysis}
 
   const detectedActions = useMemo(() => (!activeFlow) ? [] : extractActions(activeFlow.nodeCode), [activeFlow?.nodeCode]);
 
+  const getSimpleAppName = (name: string) => {
+      const simplified = name.replace(/^Adobe\s+/i, '').replace(/\s(20\d{2}|CC).*$/i, '').trim();
+      return simplified || name;
+  };
+
   useEffect(() => {
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   }, [activeFlow?.chatHistory]);
@@ -988,10 +1054,12 @@ ${result.analysis}
   const borderPrimary = isDark ? "border-slate-800" : "border-slate-200";
   const bgHeader = isDark ? "bg-slate-900" : "bg-white border-b border-slate-200";
   const filteredFlows = useMemo(() => flows.filter(f => {
+    const matchesSearch = f.name.toLowerCase().includes(flowSearch.toLowerCase());
+    if (!matchesSearch) return false;
     if (flowListFilter === 'mine') return f.ownerId === user?.id;
     if (flowListFilter === 'public') return f.isPublic === true;
     return true; 
-  }), [flows, flowListFilter, user?.id]);
+  }), [flows, flowListFilter, user?.id, flowSearch]);
 
   // -- MAIN RENDER --
   
@@ -1211,11 +1279,20 @@ ${result.analysis}
         ) : (
           // Flow List Panel
           <>
-            <div className={`px-4 py-3 border-b ${borderPrimary} flex gap-1`}>
-                {['all', 'mine', 'public'].map((f: any) => (<button key={f} onClick={() => setFlowListFilter(f)} className={`flex-1 text-[10px] uppercase font-bold py-1 px-2 rounded border transition-colors ${flowListFilter === f ? 'bg-blue-600 text-white border-blue-500' : (isDark ? 'text-slate-500 border-slate-800' : 'text-slate-500 border-slate-200')}`}>{f}</button>))}
-                <button onClick={async () => { setIsRefreshing(true); await loadAllFlows(); setTimeout(() => setIsRefreshing(false), 500); }} className={`p-1.5 rounded border transition-colors ${isDark ? 'text-slate-400 hover:text-white border-slate-700 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 border-slate-200 hover:bg-slate-100'}`}>
-                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-                </button>
+            <div className={`px-4 py-3 border-b ${borderPrimary} flex flex-col gap-2`}>
+                <div className="flex gap-1">
+                    {['all', 'mine', 'public'].map((f: any) => (<button key={f} onClick={() => setFlowListFilter(f)} className={`flex-1 text-[10px] uppercase font-bold py-1 px-2 rounded border transition-colors ${flowListFilter === f ? 'bg-blue-600 text-white border-blue-500' : (isDark ? 'text-slate-500 border-slate-800' : 'text-slate-500 border-slate-200')}`}>{f}</button>))}
+                    <button onClick={async () => { setIsRefreshing(true); await loadAllFlows(); setTimeout(() => setIsRefreshing(false), 500); }} className={`p-1.5 rounded border transition-colors ${isDark ? 'text-slate-400 hover:text-white border-slate-700 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 border-slate-200 hover:bg-slate-100'}`}>
+                        <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    </button>
+                </div>
+                <input 
+                    type="text" 
+                    placeholder="Search flows..." 
+                    value={flowSearch}
+                    onChange={(e) => setFlowSearch(e.target.value)}
+                    className={`w-full px-2 py-1 text-xs rounded border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-600 focus:border-blue-400'} focus:outline-none`}
+                />
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
                 {filteredFlows.map(f => (
@@ -1257,8 +1334,8 @@ ${result.analysis}
               ) : (
                 <h1 
                   onDoubleClick={() => { if (isOwner) setIsEditingName(true); }} 
-                  className={`font-bold leading-tight ${textPrimary} ${isOwner ? 'cursor-text hover:text-blue-400 transition-colors' : ''}`}
-                  title={isOwner ? "Double-click to rename" : ""}
+                  className={`font-bold leading-tight truncate max-w-[300px] ${textPrimary} ${isOwner ? 'cursor-text hover:text-blue-400 transition-colors' : ''}`}
+                  title={isOwner ? "Double-click to rename: " + activeFlow.name : activeFlow.name}
                 >
                   {activeFlow.name}
                 </h1>
@@ -1377,6 +1454,8 @@ ${result.analysis}
                 actions={detectedActions}
                 onRunAction={(action) => handleRun(action)}
                 onInjectSnippet={handleInjectSnippet}
+                onBrowse={handleBrowse}
+                onRemoveField={handleRemoveField}
                 isRunning={status === AppStatus.RUNNING}
                 />
                 <CodeEditor 
@@ -1408,17 +1487,22 @@ ${result.analysis}
                                 const newVal = e.target.value;
                                 if (newVal) updateActiveFlow({ targetApp: newVal });
                             }} 
+                            title={availableApps.find(a => (a.specifier || a.id) === activeFlow.targetApp)?.name || activeFlow.targetApp}
                             className={`text-xs p-1.5 rounded border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'} w-full max-w-[200px] focus:outline-none focus:border-blue-500 transition-colors`}
                         >
-                            {availableApps.length > 0 && activeFlow.targetApp && !availableApps.find(a => (a.specifier || a.id) === activeFlow.targetApp) && (
+                            {/* Ensure selected value is always an option to prevent blank state */}
+                            {activeFlow.targetApp && (
+                                (availableApps.length > 0 && !availableApps.find(a => (a.specifier || a.id) === activeFlow.targetApp)) ||
+                                (availableApps.length === 0 && !['photoshop', 'illustrator', 'indesign'].includes(activeFlow.targetApp))
+                            ) && (
                                 <option key="saved-val" value={activeFlow.targetApp}>{activeFlow.targetApp} (Saved)</option>
                             )}
-                            {availableApps.map(app => (
-                                <option key={app.specifier || app.id} value={app.specifier || app.id}>
-                                    {app.name}
+
+                            {availableApps.length > 0 ? availableApps.map(app => (
+                                <option key={app.specifier || app.id} value={app.specifier || app.id} title={app.name}>
+                                    {getSimpleAppName(app.name)}
                                 </option>
-                            ))}
-                            {availableApps.length === 0 && (
+                            )) : (
                                 <>
                                     <option value="photoshop">Photoshop</option>
                                     <option value="illustrator">Illustrator</option>
