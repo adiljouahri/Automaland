@@ -95,6 +95,7 @@ export interface AppSettings {
   aiProvider: AIProvider;
   aiBaseUrl?: string;
   aiModel: string;
+  systemInstruction?: string;
   serverUrl: string;
   strapiUrl: string;
   theme: 'dark' | 'light';

@@ -14,6 +14,7 @@ import { StrapiService } from './services/strapi';
 import { LocalStoreService } from './services/local';
 import { AutomationFlow, LogEntry, ChatMessage, AppStatus, AppSettings, EnvVariable, WatcherConfig, NpmPackage, HostAppConfig, User, FlowVersion, Announcement } from './types';
 import { INITIAL_UI_SCHEMA, INITIAL_NODE_CODE, INITIAL_APP_CODE } from './constants';
+import { EXAMPLE_FLOWS } from './examples';
 import { ADAPTER_CODE } from './adapter';
 
 function App() {
@@ -140,7 +141,10 @@ function App() {
   }, [activeFlowId]);
 
   const activeFlow = useMemo(() => {
-    const found = flows.find(f => f.id === activeFlowId);
+    let found = flows.find(f => f.id === activeFlowId);
+    if (!found) {
+        found = EXAMPLE_FLOWS.find(f => f.id === activeFlowId);
+    }
     if (found) return found;
     if (flows.length > 0) return flows[0];
     return null; 
@@ -196,6 +200,8 @@ function App() {
   const [formData, setFormData] = useState<Record<string, any>>({});
   
   const [chatInput, setChatInput] = useState('');
+  const [appFilter, setAppFilter] = useState<'all' | 'photoshop' | 'illustrator' | 'indesign' | 'aftereffects' | 'premiere' | 'lightroom'>('all');
+  const [showExamples, setShowExamples] = useState(true);
   const [flowSearch, setFlowSearch] = useState('');
   // Context inclusion state
   const [includeContext, setIncludeContext] = useState(true);
@@ -395,29 +401,6 @@ function App() {
         });
         
         const merged = Array.from(flowMap.values()).sort((a, b) => b.createdAt - a.createdAt);
-        if (merged.length === 0) {
-            return [{
-                id: 'default-flow-1',
-                flowId: 'default-uuid-1',
-                name: 'Default Automation',
-                uiSchema: INITIAL_UI_SCHEMA,
-                nodeCode: INITIAL_NODE_CODE,
-                appCode: INITIAL_APP_CODE,
-                targetApp: 'photoshop',
-                simulatedLogs: [],
-                isPublic: false,
-                chatHistory: [{
-                id: 'welcome',
-                role: 'model',
-                text: 'Hello! I am your AI Architect. Try: "Watch a folder for JPGs, watermark them in Photoshop, and upload to S3."',
-                timestamp: new Date()
-                }],
-                createdAt: Date.now(),
-                history: [],
-                executionTimeout: 10,
-                savedFormData: {}
-            }];
-        }
         return merged;
     });
   }, [user, strapi]);
@@ -436,7 +419,10 @@ function App() {
     if (isSavingRef.current) return;
     
     const targetId = flowToSave?.id || activeFlowId;
-    const freshFlow = flows.find(f => f.id === targetId);
+    let freshFlow = flows.find(f => f.id === targetId);
+    if (!freshFlow) {
+        freshFlow = EXAMPLE_FLOWS.find(f => f.id === targetId);
+    }
 
     if (!freshFlow) return;
 
@@ -1053,13 +1039,27 @@ ${result.analysis}
   const textSecondary = isDark ? "text-slate-400" : "text-slate-500";
   const borderPrimary = isDark ? "border-slate-800" : "border-slate-200";
   const bgHeader = isDark ? "bg-slate-900" : "bg-white border-b border-slate-200";
-  const filteredFlows = useMemo(() => flows.filter(f => {
-    const matchesSearch = f.name.toLowerCase().includes(flowSearch.toLowerCase());
-    if (!matchesSearch) return false;
-    if (flowListFilter === 'mine') return f.ownerId === user?.id;
-    if (flowListFilter === 'public') return f.isPublic === true;
-    return true; 
-  }), [flows, flowListFilter, user?.id, flowSearch]);
+  const filteredFlows = useMemo(() => {
+    let list = [...flows];
+    if (showExamples) {
+        const flowIds = new Set(flows.map(f => f.id));
+        const examples = EXAMPLE_FLOWS.filter(ex => !flowIds.has(ex.id));
+        list = [...list, ...examples];
+    }
+    
+    return list.filter(f => {
+        const matchesSearch = f.name.toLowerCase().includes(flowSearch.toLowerCase());
+        if (!matchesSearch) return false;
+        
+        // If filter is 'mine', exclude examples (which have no ownerId usually)
+        if (flowListFilter === 'mine') return f.ownerId === user?.id;
+        
+        // If filter is 'public', exclude examples (isPublic is false)
+        if (flowListFilter === 'public') return f.isPublic === true;
+        
+        return true; 
+    });
+  }, [flows, flowListFilter, user?.id, flowSearch, showExamples]);
 
   // -- MAIN RENDER --
   
@@ -1285,6 +1285,23 @@ ${result.analysis}
                     <button onClick={async () => { setIsRefreshing(true); await loadAllFlows(); setTimeout(() => setIsRefreshing(false), 500); }} className={`p-1.5 rounded border transition-colors ${isDark ? 'text-slate-400 hover:text-white border-slate-700 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 border-slate-200 hover:bg-slate-100'}`}>
                         <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
                     </button>
+                    <button onClick={() => setShowExamples(!showExamples)} title="Toggle Examples" className={`p-1.5 rounded border transition-colors ${showExamples ? 'bg-blue-600 text-white border-blue-500' : (isDark ? 'text-slate-400 hover:text-white border-slate-700 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 border-slate-200 hover:bg-slate-100')}`}>
+                        <LayoutGrid className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+                {/* Target App Filter */}
+                <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+                    {['all', 'photoshop', 'illustrator', 'indesign', 'aftereffects', 'premiere', 'lightroom'].map((app) => (
+                        <button 
+                            key={app} 
+                            onClick={() => {
+                                setAppFilter(app as any);
+                            }} 
+                            className={`whitespace-nowrap px-2 py-0.5 rounded-full text-[9px] font-bold uppercase border transition-colors ${appFilter === app ? 'bg-blue-500/20 text-blue-500 border-blue-500/50' : (isDark ? 'text-slate-500 border-slate-700 hover:border-slate-500' : 'text-slate-400 border-slate-200 hover:border-slate-300')}`}
+                        >
+                            {app}
+                        </button>
+                    ))}
                 </div>
                 <input 
                     type="text" 
@@ -1295,19 +1312,32 @@ ${result.analysis}
                 />
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                {filteredFlows.map(f => (
+                {filteredFlows.filter(f => appFilter === 'all' || f.targetApp === appFilter).map(f => (
                     <div key={f.id} onClick={() => { setActiveFlowId(f.id); setViewMode('editor'); }} className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer border ${activeFlowId === f.id ? (isDark ? 'bg-slate-800 border-blue-500/50' : 'bg-white border-blue-500 shadow-sm') : 'border-transparent'}`}>
-                        <div className="flex gap-3 items-center">
-                            {f.isPublic ? <Globe className="w-4 h-4 text-green-500" /> : <Lock className="w-4 h-4 text-slate-500" />}
-                            <div>
-                                <div className="font-medium text-sm truncate w-40">{f.name}</div>
-                                <div className={`text-[10px] uppercase ${f.ownerId == user?.id ? 'text-blue-400' : 'text-slate-500'}`}>{f.ownerId == user?.id ? 'Owner' : 'Library'}</div>
+                        <div className="flex gap-3 items-center overflow-hidden">
+                            {f.isPublic ? <Globe className="w-4 h-4 text-green-500 shrink-0" /> : <Lock className="w-4 h-4 text-slate-500 shrink-0" />}
+                            <div className="min-w-0">
+                                <div className="font-medium text-xs truncate w-32">{f.name}</div>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                    <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                                        f.targetApp === 'photoshop' ? 'bg-blue-900/30 text-blue-400' :
+                                        f.targetApp === 'illustrator' ? 'bg-orange-900/30 text-orange-400' :
+                                        f.targetApp === 'indesign' ? 'bg-pink-900/30 text-pink-400' :
+                                        f.targetApp === 'aftereffects' ? 'bg-purple-900/30 text-purple-400' :
+                                        f.targetApp === 'premiere' ? 'bg-violet-900/30 text-violet-400' :
+                                        f.targetApp === 'lightroom' ? 'bg-cyan-900/30 text-cyan-400' :
+                                        'bg-slate-700 text-slate-400'
+                                    }`}>
+                                        {f.targetApp ? f.targetApp.substring(0, 2).toUpperCase() : '??'}
+                                    </span>
+                                    <span className={`text-[9px] uppercase ${f.ownerId == user?.id ? 'text-blue-400' : 'text-slate-500'}`}>{f.ownerId == user?.id ? 'Owner' : 'Library'}</span>
+                                </div>
                             </div>
                         </div>
                         {(f.ownerId == user?.id || !f.isPublic) && <button onClick={(e) => handleDeleteFlow(f.id, e)} className="p-1.5 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>}
                     </div>
                 ))}
-                {filteredFlows.length === 0 && (
+                {filteredFlows.filter(f => appFilter === 'all' || f.targetApp === appFilter).length === 0 && (
                     <div className="text-center p-4 text-xs text-slate-500">No flows found.</div>
                 )}
             </div>
@@ -1424,7 +1454,7 @@ ${result.analysis}
                         onChange={(e) => updateActiveFlow({ executionTimeout: parseInt(e.target.value) || 10 })}
                         className={`w-12 py-2 text-center text-xs font-bold rounded-l-lg border-y border-l ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'} focus:outline-none`}
                     />
-                    <button onClick={() => handleRun('run')} disabled={status !== AppStatus.IDLE} className="flex items-center gap-2 px-4 py-2 rounded-r-lg font-bold text-sm bg-green-600 hover:bg-green-500 text-white shadow-lg transition-all disabled:opacity-50"><Play className="w-4 h-4 fill-current" /> Run</button>
+                    <button onClick={() => window.location.reload()} className="flex items-center gap-2 px-4 py-2 rounded-r-lg font-bold text-sm bg-slate-600 hover:bg-slate-500 text-white shadow-lg transition-all"><RefreshCw className="w-4 h-4" /> Restart Server</button>
                 </div>
             )}
           </div>
