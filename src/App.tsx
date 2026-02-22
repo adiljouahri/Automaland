@@ -1358,8 +1358,20 @@ ${result.analysis}
                   className={`bg-transparent font-bold leading-tight border-b-2 border-blue-500 focus:outline-none ${textPrimary}`}
                   value={activeFlow.name}
                   onChange={(e) => updateActiveFlow({ name: e.target.value })}
-                  onBlur={() => { setIsEditingName(false); if(isOwner && activeFlow.flowId) handleSaveFlow(); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { setIsEditingName(false); if(isOwner && activeFlow.flowId) handleSaveFlow(); } }}
+                  onBlur={() => { 
+                      setIsEditingName(false); 
+                      if(isOwner && activeFlow.flowId) {
+                          handleSaveFlow({ ...activeFlow, name: nameInputRef.current?.value || activeFlow.name });
+                      }
+                  }}
+                  onKeyDown={(e) => { 
+                      if (e.key === 'Enter') { 
+                          setIsEditingName(false); 
+                          if(isOwner && activeFlow.flowId) {
+                              handleSaveFlow({ ...activeFlow, name: nameInputRef.current?.value || activeFlow.name });
+                          }
+                      } 
+                  }}
                 />
               ) : (
                 <h1 
@@ -1447,13 +1459,7 @@ ${result.analysis}
             
             {activeFlow && (
                 <div className="flex items-center gap-1">
-                    <input 
-                        type="number" 
-                        title="Timeout in Seconds"
-                        value={activeFlow.executionTimeout || 10}
-                        onChange={(e) => updateActiveFlow({ executionTimeout: parseInt(e.target.value) || 10 })}
-                        className={`w-12 py-2 text-center text-xs font-bold rounded-l-lg border-y border-l ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'} focus:outline-none`}
-                    />
+
                     <button onClick={() => window.location.reload()} className="flex items-center gap-2 px-4 py-2 rounded-r-lg font-bold text-sm bg-slate-600 hover:bg-slate-500 text-white shadow-lg transition-all"><RefreshCw className="w-4 h-4" /> Restart Server</button>
                 </div>
             )}

@@ -200,14 +200,89 @@ exports.run = async (data) => {
       }
     },
     `exports.run = async (data) => {
-  // Node logic to read files, then loop and place in PS
   const fs = require('fs');
-  const files = fs.readdirSync(data.folder).filter(f => f.match(/jpg|png/));
+  const path = require('path');
   
+  // 1. Get files
+  const files = fs.readdirSync(data.folder).filter(f => f.match(/\\.(jpg|jpeg|png)$/i));
+  if (files.length === 0) {
+      utils.setUI('status', 'No images found');
+      return;
+  }
+  
+  // 2. Prepare full paths for ExtendScript
+  const filePaths = files.map(f => path.join(data.folder, f).replace(/\\\\/g, '/'));
+
+  // 3. Run JSX
   await $.run_jsx(\`
-    var doc = app.documents.add(2000, 2000);
-    // Logic to place files in grid...
-    alert("Contact sheet created for \${files.length} images.");
+    var paths = \${JSON.stringify(filePaths)};
+    var doc = app.documents.add(2000, 2000, 72, "Contact Sheet");
+    
+    var cols = 4;
+    var rows = 4;
+    var cellW = doc.width / cols;
+    var cellH = doc.height / rows;
+    
+    var x = 0;
+    var y = 0;
+    
+    for(var i=0; i<paths.length; i++) {
+        var f = new File(paths[i]);
+        if(f.exists) {
+            placeFile(f);
+            var layer = doc.activeLayer;
+            
+            // Resize to fit cell (90% of cell size)
+            var lb = layer.bounds; 
+            var w = lb[2].value - lb[0].value;
+            var h = lb[3].value - lb[1].value;
+            
+            var scaleX = (cellW * 0.9) / w * 100;
+            var scaleY = (cellH * 0.9) / h * 100;
+            var scale = Math.min(scaleX, scaleY);
+            
+            layer.resize(scale, scale);
+            
+            // Move to grid position (Center in cell)
+            lb = layer.bounds;
+            var curW = lb[2].value - lb[0].value;
+            var curH = lb[3].value - lb[1].value;
+            
+            var targetX = (x * cellW) + (cellW - curW)/2;
+            var targetY = (y * cellH) + (cellH - curH)/2;
+            
+            // Translate relative to current top-left
+            layer.translate(targetX - lb[0].value, targetY - lb[1].value);
+            
+            x++;
+            if(x >= cols) {
+                x = 0;
+                y++;
+                if(y >= rows) {
+                    // Start new page or stop? For now just stop or stack
+                    // y = 0; // Overlap
+                }
+            }
+        }
+    }
+    
+    function placeFile(file) {
+        var idPlc = charIDToTypeID( "Plc " );
+        var desc = new ActionDescriptor();
+        var idnull = charIDToTypeID( "null" );
+        desc.putPath( idnull, file );
+        desc.putEnumerated( charIDToTypeID( "FTcs" ), charIDToTypeID( "QCSt" ), charIDToTypeID( "Qcsa" ) ); // Place as Smart Object
+        var idOfst = charIDToTypeID( "Ofst" );
+        var desc2 = new ActionDescriptor();
+        var idHrzn = charIDToTypeID( "Hrzn" );
+        var idVrtc = charIDToTypeID( "Vrtc" );
+        desc2.putUnitDouble( idHrzn, charIDToTypeID( "#Pxl" ), 0.000000 );
+        desc2.putUnitDouble( idVrtc, charIDToTypeID( "#Pxl" ), 0.000000 );
+        desc.putObject( idOfst, charIDToTypeID( "Ofst" ), desc2 );
+        executeAction( idPlc, desc, DialogModes.NO );
+    }
+    
+    alert("Contact sheet created for " + paths.length + " images.");
   \`);
 };`,
     `// Host Code`
