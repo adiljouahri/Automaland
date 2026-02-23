@@ -567,18 +567,63 @@ exports.run = async (data) => {
     `// Host Code`
   ),
   createExample(
-    'ai-10', 'Pattern Generator', 'illustrator',
-    'Randomly rotates and scales selected objects to create organic variety.',
-    { type: "object", properties: {} },
-    `exports.run = async () => {
+    'ai-11', 'Logo Generator', 'illustrator',
+    'Generates a simple geometric logo with text.',
+    {
+      type: "object",
+      properties: {
+        companyName: { type: "string", title: "Company Name", default: "HEXA" },
+        primaryColor: { type: "string", title: "Primary Color (Hex)", default: "#FF5733" },
+        shape: { type: "string", title: "Shape", enum: ["Hexagon", "Circle", "Square"], default: "Hexagon" }
+      }
+    },
+    `exports.run = async (data) => {
   await $.run_jsx(\`
-    var sel = app.activeDocument.selection;
-    for(var i=0; i<sel.length; i++) {
-        var rot = Math.random() * 360;
-        var scale = 50 + Math.random() * 100;
-        sel[i].rotate(rot);
-        sel[i].resize(scale, scale);
+    var doc = app.documents.add(DocumentColorSpace.RGB, 500, 500);
+    var center = [250, 250];
+    
+    // 1. Create Color
+    var hex = "\${data.primaryColor}".replace('#','');
+    var col = new RGBColor();
+    col.red = parseInt(hex.substring(0,2), 16);
+    col.green = parseInt(hex.substring(2,4), 16);
+    col.blue = parseInt(hex.substring(4,6), 16);
+    
+    // 2. Draw Shape
+    var shapeLayer = doc.layers.add();
+    shapeLayer.name = "Logo Shape";
+    var path;
+    
+    if ("\${data.shape}" === "Circle") {
+        path = shapeLayer.pathItems.ellipse(center[1]+100, center[0]-100, 200, 200);
+    } else if ("\${data.shape}" === "Square") {
+        path = shapeLayer.pathItems.rectangle(center[1]+100, center[0]-100, 200, 200);
+    } else {
+        // Hexagon
+        path = shapeLayer.pathItems.polygon(center[0], center[1], 100, 6);
     }
+    
+    path.filled = true;
+    path.fillColor = col;
+    path.stroked = false;
+    
+    // 3. Add Text
+    var textLayer = doc.layers.add();
+    textLayer.name = "Logo Text";
+    var t = textLayer.textFrames.add();
+    t.contents = "\${data.companyName}";
+    t.top = center[1] - 120;
+    t.left = center[0];
+    
+    var attr = t.textRange.characterAttributes;
+    attr.size = 40;
+    attr.fillColor = col;
+    try { attr.textFont = app.textFonts.getByName("Arial-BoldMT"); } catch(e){}
+    
+    // Center Text (Approximate)
+    t.left = center[0] - (t.width/2);
+    
+    alert("Logo Generated!");
   \`);
 };`,
     `// Host Code`
@@ -745,16 +790,44 @@ exports.run = async (data) => {
   createExample(
     'ae-1', 'CSV to Lower Thirds', 'aftereffects',
     'Duplicates a comp for each row in a CSV and updates text layers.',
-    { type: "object", properties: { csv: { type: "string", format: "file" } } },
+    { type: "object", properties: { csv: { type: "string", title: "CSV File", format: "file" } } },
     `exports.run = async (data) => {
-  // Node reads CSV...
+  const fs = require('fs');
+  const content = fs.readFileSync(data.csv, 'utf8');
+  const lines = content.split('\\n').filter(l => l.trim());
+  const rows = lines.map(l => l.split(',')); // Simple CSV parse
+
   await $.run_jsx(\`
+    var rows = \${JSON.stringify(rows)};
     var proj = app.project;
-    var template = proj.item(1); // Assume item 1 is template comp
-    // Loop logic would go here
-    var newComp = template.duplicate();
-    newComp.name = "Lower Third 1";
-    newComp.layer(1).property("Source Text").setValue("New Name");
+    var template = null;
+    
+    // Find template comp (assumes it's selected or named "Template")
+    for(var i=1; i<=proj.numItems; i++) {
+        if(proj.item(i) instanceof CompItem && proj.item(i).name === "Template") {
+            template = proj.item(i);
+            break;
+        }
+    }
+    
+    if(!template && proj.numItems > 0) template = proj.item(1);
+
+    if(template) {
+        for(var i=0; i<rows.length; i++) {
+            var name = rows[i][0];
+            var title = rows[i][1];
+            
+            var newComp = template.duplicate();
+            newComp.name = "LT_" + name;
+            
+            // Update text layers (assumes layer 1 is name, layer 2 is title)
+            if(newComp.numLayers >= 1) newComp.layer(1).property("Source Text").setValue(name);
+            if(newComp.numLayers >= 2) newComp.layer(2).property("Source Text").setValue(title);
+        }
+        alert("Created " + rows.length + " lower thirds.");
+    } else {
+        alert("No template comp found. Please name your comp 'Template'.");
+    }
   \`);
 };`,
     `// Host Code`

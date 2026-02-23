@@ -427,6 +427,7 @@ async function runNodeCode({ code, triggerData, envVars, entryPoint, targetApp, 
             const encodedTrigger = encodeJSX(triggerData);
 
             const finalJsx = `
+      
 #include "${formatPath(LIB_JSON)}"
 #include "${formatPath(LIB_UNDERSCORE)}"
 #include "${formatPath(LIB_LOGGER)}"
@@ -444,12 +445,16 @@ __tripanel_wrap__(function() {
     ${jsxCode}
 });
             `;
-
+            console.log(appToUse)
             if (!bridgeReady) return `Simulation Result from ${appToUse}: Success`;
 
             try {
                 if (hostBridge) {
-                    const resultRaw = await hostBridge.evaluate(appToUse, finalJsx, "main", timeout, true);
+                    let targetEngine='main'
+                    if(appToUse.indexOf('premierepro')>-1){
+                        targetEngine='NewWorld'
+                    }
+                    const resultRaw = await hostBridge.evaluate(appToUse, finalJsx,targetEngine, timeout, true);
                     let jsonResult;
                     console.log('resultRaw',resultRaw)
                     try { jsonResult = JSON.parse(resultRaw); } 
