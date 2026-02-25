@@ -24,7 +24,7 @@ function App() {
     return {
       aiApiKey: '',
       aiProvider: 'gemini',
-      aiModel: 'gemini-3-flash',
+      aiModel: 'gemini-3-flash-preview',
       serverUrl: 'http://localhost:3001',
       strapiUrl: 'https://tripanelserver-9a123e242287.herokuapp.com',
       theme: 'dark'
@@ -1368,6 +1368,7 @@ ${result.analysis}
                       if (e.key === 'Enter') { 
                           setIsEditingName(false); 
                           if(isOwner && activeFlow.flowId) {
+                            
                               handleSaveFlow({ ...activeFlow, name: nameInputRef.current?.value || activeFlow.name });
                           }
                       } 

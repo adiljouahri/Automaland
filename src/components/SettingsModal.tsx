@@ -24,8 +24,8 @@ interface SettingsModalProps {
 
 const PROVIDER_MODELS: Record<AIProvider, string[]> = {
     gemini: [
-        'gemini-3-flash',        // High-speed generation
-        'gemini-3-pro',          // New Flagship (multimodal & vibe-coding)
+        'gemini-3-flash-preview',        // High-speed generation
+        'gemini-3-pro-preview',          // New Flagship (multimodal & vibe-coding)
         'gemini-3-deep-think',   // February 2026 release for reasoning
         'gemini-2.5-pro',        // Stable enterprise workhorse
         'gemini-2.5-flash',      // Agentic-optimized low latency
