@@ -439,7 +439,7 @@ exports.run = async (data) => {
   const qrUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=\${encodeURIComponent(data.url)}\`;
   const tmpPath = path.join(process.cwd(), 'temp_qr.png');
   
-  await utils.download(qrUrl, tmpPath);
+  await utils.downloadFile(qrUrl, tmpPath);
   
   await $.run_jsx(\`
     var doc = app.activeDocument;

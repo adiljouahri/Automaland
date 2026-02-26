@@ -8,6 +8,8 @@ const vm = require('vm');
 const chokidar = require('chokidar');
 const axios = require('axios');
 const archiver = require('archiver');
+const xlsx = require('xlsx');
+const { parse: csvParse } = require('csv-parse/sync');
 // Force bundler to include fast-xml-parser
 const FastXMLParserLib = require('fast-xml-parser');
 const EventEmitter = require('events');
@@ -392,6 +394,42 @@ const utils = {
     },
     readFile: (p) => fs.readFileSync(p, 'utf8'),
     getHomeDir: () => process.env.HOME || process.env.USERPROFILE,
+    parseCSV: (content, options = {}) => {
+        return csvParse(content, { columns: true, skip_empty_lines: true, ...options });
+    },
+    parseXLSX: (filePath) => {
+        const workbook = xlsx.readFile(filePath);
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        return xlsx.utils.sheet_to_json(worksheet);
+    },
+    parseSRT: (content) => {
+        const lines = content.replace(/\r/g, '').split('\n');
+        const items = [];
+        let currentItem = null;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            if (!isNaN(line)) {
+                if (currentItem) items.push(currentItem);
+                currentItem = { id: parseInt(line), text: '' };
+            } else if (line.includes(' --> ')) {
+                if (currentItem) {
+                    const parts = line.split(' --> ');
+                    currentItem.start = parts[0];
+                    currentItem.end = parts[1];
+                }
+            } else {
+                if (currentItem) {
+                    currentItem.text += (currentItem.text ? '\n' : '') + line;
+                }
+            }
+        }
+        if (currentItem) items.push(currentItem);
+        return items;
+    }
 };
 
 // --- Core Execution Logic ---
@@ -427,7 +465,6 @@ async function runNodeCode({ code, triggerData, envVars, entryPoint, targetApp, 
             const encodedTrigger = encodeJSX(triggerData);
 
             const finalJsx = `
-      
 #include "${formatPath(LIB_JSON)}"
 #include "${formatPath(LIB_UNDERSCORE)}"
 #include "${formatPath(LIB_LOGGER)}"
@@ -445,18 +482,13 @@ __tripanel_wrap__(function() {
     ${jsxCode}
 });
             `;
-            console.log(appToUse)
+
             if (!bridgeReady) return `Simulation Result from ${appToUse}: Success`;
 
             try {
                 if (hostBridge) {
-                    let targetEngine='main'
-                    if(appToUse.indexOf('premierepro')>-1){
-                        targetEngine='NewWorld'
-                    }
-                    const resultRaw = await hostBridge.evaluate(appToUse, finalJsx,targetEngine, timeout, true);
+                    const resultRaw = await hostBridge.evaluate(appToUse, finalJsx, "main", timeout, true);
                     let jsonResult;
-                    console.log('resultRaw',resultRaw)
                     try { jsonResult = JSON.parse(resultRaw); } 
                     catch (parseErr) { throw new Error(`Invalid JSON returned from app: ${resultRaw}`); }
     
@@ -486,6 +518,8 @@ __tripanel_wrap__(function() {
         if (name === 'path' || name === 'node:path') return path;
         if (name === 'chokidar') return chokidar;
         if (name === 'archiver') return archiver;
+        if (name === 'xlsx') return xlsx;
+        if (name === 'csv-parse' || name === 'csv-parse/sync') return { parse: csvParse };
         if (name === 'fast-xml-parser') return FastXMLParserLib;
         if (name === 'events' || name === 'node:events') return EventEmitter;
         if (name === 'util' || name === 'node:util') return require('util');

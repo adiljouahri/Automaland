@@ -997,6 +997,14 @@ ${result.analysis}
     if (status !== AppStatus.IDLE) return;
     const targetFlow = specificFlow || activeFlow;
     if (!targetFlow) return;
+
+    // Security Check: Block public flows from running
+    if (targetFlow.isPublic) {
+        addLog(`Security Block: For your safety, public flows cannot be executed directly.`, "SYSTEM", "error");
+        alert("Security Block: Public flows must be imported to your local library before they can be executed. This allows you to verify the code for any security issues.");
+        return;
+    }
+
     setStatus(AppStatus.RUNNING);
     addLog(`Starting '${entryPoint}'...`, "SYSTEM");
     try {
@@ -1368,7 +1376,6 @@ ${result.analysis}
                       if (e.key === 'Enter') { 
                           setIsEditingName(false); 
                           if(isOwner && activeFlow.flowId) {
-                            
                               handleSaveFlow({ ...activeFlow, name: nameInputRef.current?.value || activeFlow.name });
                           }
                       } 
@@ -1460,7 +1467,13 @@ ${result.analysis}
             
             {activeFlow && (
                 <div className="flex items-center gap-1">
-
+                    <input 
+                        type="number" 
+                        title="Timeout in Seconds"
+                        value={activeFlow.executionTimeout || 10}
+                        onChange={(e) => updateActiveFlow({ executionTimeout: parseInt(e.target.value) || 10 })}
+                        className={`w-12 py-2 text-center text-xs font-bold rounded-l-lg border-y border-l ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'} focus:outline-none`}
+                    />
                     <button onClick={() => window.location.reload()} className="flex items-center gap-2 px-4 py-2 rounded-r-lg font-bold text-sm bg-slate-600 hover:bg-slate-500 text-white shadow-lg transition-all"><RefreshCw className="w-4 h-4" /> Restart Server</button>
                 </div>
             )}
@@ -1486,14 +1499,15 @@ ${result.analysis}
                 schemaStr={activeFlow.uiSchema} 
                 formData={formData} 
                 onChange={setFormData} 
-                onSchemaChange={(code) => { if (isOwner) updateActiveFlow({ uiSchema: code }); }} 
+                onSchemaChange={(code) => { if (isOwner && !activeFlow.isPublic) updateActiveFlow({ uiSchema: code }); }} 
                 theme={settings.theme} 
-                actions={detectedActions}
+                actions={activeFlow.isPublic ? [] : detectedActions}
                 onRunAction={(action) => handleRun(action)}
                 onInjectSnippet={handleInjectSnippet}
                 onBrowse={handleBrowse}
                 onRemoveField={handleRemoveField}
                 isRunning={status === AppStatus.RUNNING}
+                disabled={activeFlow.isPublic}
                 />
                 <CodeEditor 
                     key={`node-${activeFlow.id}`}
@@ -1501,8 +1515,8 @@ ${result.analysis}
                     language="javascript" 
                     icon={<Cpu className="w-4 h-4" />} 
                     code={activeFlow.nodeCode} 
-                    readonly={false} 
-                    onChange={(code) => updateActiveFlow({ nodeCode: code })} 
+                    readonly={activeFlow.isPublic} 
+                    onChange={(code) => { if (!activeFlow.isPublic) updateActiveFlow({ nodeCode: code }); }} 
                     theme={settings.theme} 
                 />
                 <CodeEditor 
