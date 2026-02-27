@@ -15,6 +15,7 @@ interface FormRendererProps {
   onBrowse?: (key: string, type: 'file' | 'folder') => void;
   onRemoveField?: (key: string) => void;
   isRunning?: boolean;
+  disabled?: boolean;
 }
 
 export const FormRenderer: React.FC<FormRendererProps> = ({ 
@@ -28,7 +29,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   onInjectSnippet,
   onBrowse,
   onRemoveField,
-  isRunning = false
+  isRunning = false,
+  disabled = false
 }) => {
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -176,7 +178,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       </div>
       
       {/* TOOLBAR */}
-      <div className={`flex flex-col gap-2 px-3 py-2 border-b ${headerBorder} ${isDark ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
+      <div className={`flex flex-col gap-2 px-3 py-2 border-b ${headerBorder} ${isDark ? 'bg-slate-900/50' : 'bg-slate-50'} ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
             <div className="flex items-center gap-1">
                 <span className="text-[10px] uppercase font-bold text-slate-500 mr-2 w-10 shrink-0">Basic:</span>
                 <button onClick={() => injectField('string')} title="Add Text Input" className={`flex items-center gap-1 p-1.5 rounded transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-200 text-slate-600'}`}>
@@ -282,7 +284,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                                 <select
                                 value={formData[key] !== undefined ? formData[key] : (prop.default || '')}
                                 onChange={(e) => handleChange(key, e.target.value)}
-                                className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                                disabled={disabled || isRunning}
+                                className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors ${disabled || isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >
                                     <option value="" disabled>Select an option</option>
                                 {prop.enum.map((opt: string) => (
@@ -295,7 +298,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                                         type="checkbox"
                                         checked={formData[key] !== undefined ? formData[key] : (prop.default || false)}
                                         onChange={(e) => handleChange(key, e.target.checked)}
-                                        className={`w-4 h-4 rounded ${inputBorder} ${inputBg} text-blue-500 focus:ring-blue-500`}
+                                        disabled={disabled || isRunning}
+                                        className={`w-4 h-4 rounded ${inputBorder} ${inputBg} text-blue-500 focus:ring-blue-500 ${disabled || isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     />
                                     <span className={`text-sm ${labelColor}`}>{prop.title || key}</span>
                                 </div>
@@ -304,7 +308,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                                 type="number"
                                 value={formData[key] !== undefined ? formData[key] : (prop.default || '')}
                                 onChange={(e) => handleChange(key, Number(e.target.value))}
-                                className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                                disabled={disabled || isRunning}
+                                className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors ${disabled || isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 placeholder="0"
                                 />
                             ) : (
@@ -313,13 +318,15 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                                     type="text"
                                     value={formData[key] !== undefined ? formData[key] : (prop.default || '')}
                                     onChange={(e) => handleChange(key, e.target.value)}
-                                    className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors`}
+                                    disabled={disabled || isRunning}
+                                    className={`w-full ${inputBg} border ${inputBorder} rounded px-3 py-2 text-sm ${inputText} focus:border-blue-500 focus:outline-none transition-colors ${disabled || isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     placeholder={key.toLowerCase().includes('path') ? '/path/to/...' : 'Enter text...'}
                                     />
                                     {(isFile || isFolder) && (
                                         <button 
                                             onClick={() => onBrowse && onBrowse(key, isFile ? 'file' : 'folder')}
-                                            className={`px-3 py-2 rounded border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-300 hover:bg-slate-50 text-slate-700'} transition-colors`}
+                                            disabled={disabled || isRunning}
+                                            className={`px-3 py-2 rounded border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-300 hover:bg-slate-50 text-slate-700'} transition-colors ${disabled || isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
                                             title={isFile ? "Browse File" : "Browse Folder"}
                                         >
                                             {isFile ? <FileSearch className="w-4 h-4" /> : <FolderOpen className="w-4 h-4" />}
