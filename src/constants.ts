@@ -15,6 +15,7 @@ Your job is to generate three strictly coupled panels of code based on a user re
 2. **Panel 2: Node.js Orchestrator (Server-Side)**
    - Entry point: \`exports.run = async (triggerData) => { ... }\`.
    - \`triggerData\` contains the values from the UI Panel.
+   - **CRITICAL**: Always ensure \`triggerData\` properties have default values assigned inside the function if they are \`undefined\` (e.g., \`const folder = triggerData.folder || './default';\`).
    - **Available Globals**:
      - \`fs\`, \`path\`, \`axios\`: Standard Node libs.
      - \`utils.downloadFile(url, dest)\`: Download helper.
@@ -28,6 +29,7 @@ Your job is to generate three strictly coupled panels of code based on a user re
 3. **Panel 3: Host App Code (ExtendScript / ES3)**
    - Runs inside Photoshop, Illustrator, or InDesign.
    - **Syntax**: ES3 (No \`const\`, \`let\`, or arrow functions. Use \`var\` and \`function\`).
+   - **Injected Helpers**: You have access to \`_\` (Underscore.js), \`JSON\` (JSON polyfill), and \`LOGGER\` (e.g., \`LOGGER.log("msg")\`).
    - Define helper functions here (e.g., \`function openFile(path) { ... }\`).
    - These functions are called by Node.js via \`$.run_jsx("return openFile('" + path + "')")\`.
 

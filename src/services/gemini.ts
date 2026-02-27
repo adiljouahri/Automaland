@@ -2,7 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AutomationFlow } from "../types";
 
 const SYSTEM_INSTRUCTION = `
-You are an expert Senior Automation Architect for the "Automland Automator" app.
+You are an expert Senior Automation Architect for the "TriPanel Automator" app.
 This app orchestrates workflows using three distinct panels:
 1. UI Panel: JSON Schema (Draft 7) for user input forms.
 2. Node.js Panel: Server-side logic using standard Node modules + a 'utils' helper.
@@ -14,15 +14,24 @@ Also provide a list of 5-8 realistic execution logs that would appear when this 
 Context:
 - Node.js environment has 'fs', 'path', 'axios' and a global 'utils' object.
 - Creative environment is ExtendScript (ES3). usage: 'app.activeDocument', 'alert()', etc.
+- Injected Helpers in ExtendScript: You have access to '_' (Underscore.js), 'JSON' (JSON polyfill), and 'LOGGER' (e.g., 'LOGGER.log("msg")').
 - UI Schema should match the inputs needed by the Node script.
 - Important: Never use the word "Adobe" in descriptions or UI titles. Use names like "Photoshop", "Illustrator", "InDesign", or "Creative App".
 
 Node.js Panel Best Practices:
 - The Node.js script acts as the orchestrator.
 - **Critical**: Export functions using \`exports.functionName = async (triggerData) => { ... }\`.
+- **CRITICAL**: Always ensure \`triggerData\` properties have default values assigned inside the function if they are \`undefined\` (e.g., \`const folder = triggerData.folder || './default';\`).
 - The 'run' function (\`exports.run\`) is the main entry point.
 - You can create additional exports (e.g., \`exports.reset\`, \`exports.processBatch\`, \`exports.uploadResults\`). These will automatically appear as "Quick Action" buttons in the Flow Dashboard grid view, allowing users to trigger specific parts of the workflow independently.
 - Use \`await $.run_jsx(code)\` to execute code from the Creative App Panel.
+
+### SECURITY ANALYSIS
+Before generating code, perform a brief security analysis of the requested automation. Consider:
+- File system access (e.g., preventing directory traversal).
+- Execution of arbitrary or untrusted code.
+- Safe handling of sensitive data (e.g., API keys, PII).
+Include a short summary of this security analysis in your \`explanation\`.
 `;
 
 export const generateAutomationFlow = async (
@@ -43,6 +52,7 @@ export const generateAutomationFlow = async (
     type: Type.OBJECT,
     properties: {
       name: { type: Type.STRING, description: "A short, catchy name for this flow" },
+      explanation: { type: Type.STRING, description: "A concise message to the user describing what was built, including a brief security analysis." },
       uiSchema: { type: Type.STRING, description: "Valid JSON Schema object serialized as a string" },
       nodeCode: { type: Type.STRING, description: "The Node.js javascript code" },
       appCode: { type: Type.STRING, description: "The ExtendScript (JSX) code for the creative app" },
@@ -52,7 +62,7 @@ export const generateAutomationFlow = async (
         description: "A list of strings representing the console output during a successful run."
       }
     },
-    required: ["name", "uiSchema", "nodeCode", "appCode", "simulatedLogs"]
+    required: ["name", "explanation", "uiSchema", "nodeCode", "appCode", "simulatedLogs"]
   };
 
   const userPrompt = currentFlow 

@@ -61,6 +61,7 @@
     *   **Grid View Integration:** Any function exported via `exports.myAction = ...` is automatically detected by the UI.
     *   These exports appear as buttons on the Flow Card in Grid View and in the Quick Actions bar in Editor View.
     *   The default entry point is `exports.run`.
+    *   **Best Practice:** Always ensure `triggerData` properties have default values assigned inside the function if they are `undefined` (e.g., `const folder = triggerData.folder || './default';`).
 *   **Helpers:**
     *   `utils.downloadFile(url, dest)`
     *   `utils.zip(source, dest)`
@@ -197,6 +198,7 @@ The chat interface generates the code for the panels.
     *   User provides their own API Key (Gemini/OpenAI).
     *   Model selection (Gemini 3 Series).
 *   **Action Recognition:** The AI is instructed to break down complex workflows into discrete named exports in the Node.js file (e.g., `exports.downloadAssets`, `exports.processImages`), which become clickable actions in the UI.
+*   **Security Analysis:** The AI is instructed to perform a brief security analysis of the requested automation (checking for directory traversal, arbitrary code execution, and sensitive data handling) and include it in the explanation.
 
 ---
 
@@ -274,59 +276,3 @@ npm install
 npm run tauri build
 ```
 *Output:* `src-tauri/target/release/bundle/msi/`
-
----
-
-## 9. Troubleshooting Strapi Deployment (Auth & Cookies)
-
-If you are experiencing errors like `Invalid callback URL provided` or `Cannot send secure cookie over unencrypted connection` after deploying Strapi:
-
-### Fix 1: Trusting the Proxy (Secure Cookie Error)
-If deploying to a platform like Render, Heroku, or DigitalOcean App Platform, SSL is terminated at the load balancer. You must tell Strapi to trust the proxy so it knows it is secure.
-
-**Update `config/server.js` on your Strapi Server:**
-```javascript
-module.exports = ({ env }) => ({
-  host: env('HOST', '0.0.0.0'),
-  port: env.int('PORT', 1337),
-  // Important: Use the 'url' property to define the public URL
-  url: env('PUBLIC_URL', 'https://your-app-name.herokuapp.com'),
-  app: {
-    keys: env.array('APP_KEYS'),
-  },
-  // CRITICAL: Set proxy to true to fix "secure cookie" errors
-  proxy: true, 
-  webhooks: {
-    populateRelations: env.bool('WEBHOOKS_POPULATE_RELATIONS', false),
-  },
-});
-```
-
-### Fix 2: Whitelisting the Desktop App Callback
-Strapi v4/v5 validates where it redirects users after login. Since the Desktop App runs on `http://localhost:3001` (the sidecar), you must whitelist this URL.
-
-1. Go to **Strapi Admin Panel** -> **Settings**.
-2. Go to **Users & Permissions** -> **Advanced Settings**.
-3. Find **Allowed redirection URLs**.
-4. Add the following line:
-   `http://localhost:3001`
-5. Click **Save**.
-
-### Fix 3: Configuring Google Provider
-Ensure `config/plugins.js` is set up to read from your environment variables:
-```javascript
-module.exports = ({ env }) => ({
-  'users-permissions': {
-    config: {
-      providers: {
-        google: {
-          enabled: true,
-          clientId: env('GOOGLE_CLIENT_ID'),
-          clientSecret: env('GOOGLE_CLIENT_SECRET'),
-          redirectUri: env('GOOGLE_REDIRECT_URI'), // Must match Google Cloud Console
-        },
-      },
-    },
-  },
-});
-```
