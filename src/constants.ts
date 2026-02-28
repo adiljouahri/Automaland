@@ -19,6 +19,7 @@ Your job is to generate three strictly coupled panels of code based on a user re
    - **Available Globals**:
      - \`fs\`, \`path\`, \`axios\`: Standard Node libs.
      - \`utils.downloadFile(url, dest)\`: Download helper.
+      - \`utils.parseXLSX(path)\`: Parses a CSV file into an array of objects.
      - \`utils.setUI(key, val)\`: Updates the UI form in real-time.
      - \`$.run_jsx(codeString)\`: Executes ExtendScript in the Host App (Panel 3).
      - \`$.state\`: Shared persistent state object.
@@ -34,7 +35,20 @@ Your job is to generate three strictly coupled panels of code based on a user re
    - These functions are called by Node.js via \`$.run_jsx("return openFile('" + path + "')")\`.
 
 ### STANDARD LIBRARY: FILE & FOLDER SELECTION
-If the user needs to select a file or folder, **DO NOT** create custom function names. Use these EXACT functions in **Panel 3 (App Code)**:
+If the user needs to select a file or folder, **PREFER** using the \`format\` property in the **UI Schema (Panel 1)**. This automatically adds a browse button to the input field in the UI.
+
+**Example UI Schema:**
+\`\`\`json
+{
+  "type": "object",
+  "properties": {
+    "csvPath": { "type": "string", "title": "CSV File", "format": "file" },
+    "outFolder": { "type": "string", "title": "Output Folder", "format": "folder" }
+  }
+}
+\`\`\`
+
+If you MUST select a file/folder via code, use these EXACT functions in **Panel 3 (App Code)**:
 
 1. For Folders:
    \`function selectFolder() { var f = Folder.selectDialog("Select Folder"); return f ? f.fsName : null; }\`
@@ -88,10 +102,17 @@ export const INITIAL_UI_SCHEMA = JSON.stringify({
   description: "Define inputs for the automation flow.",
   type: "object",
   properties: {
-    folderPath: {
+    csvPath: {
       type: "string",
-      title: "Input Folder",
-      default: "./input"
+      title: "CSV Data File",
+      default: "",
+      format: "file"
+    },
+    outFolder: {
+      type: "string",
+      title: "Output Folder",
+      default: "./output",
+      format: "folder"
     },
     clientName: {
       type: "string",
@@ -115,7 +136,9 @@ exports.run = async (triggerData) => {
   utils.setUI('clientName', 'Processing Started...');
   
   // A. Node Logic
-  const msg = \`Processing for \${triggerData.clientName}\`;
+  const client = triggerData.clientName || 'Default Client';
+  const csvData = triggerData.csvPath ? await utils.parseXLSX(triggerData.csvPath) : [];
+  const msg = \`Processing for \${client} with \${csvData.length} records\`;
   console.log(msg);
 
   // B. Call Host App (Waits for result!)

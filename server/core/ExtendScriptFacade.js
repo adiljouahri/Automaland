@@ -166,7 +166,9 @@ class ExtendScriptFacade extends events.EventEmitter {
         const resolvedSpec = resolveRes.specifier;
         // Wrap source in CDATA as per ESTK protocol
         const escapedSource = source.replace(/]]>/g, `]]]]><![CDATA[>`);
-        const xmlCommand = `<eval engine="${engineName}"><source><![CDATA[${escapedSource}]]></source></eval>`;
+        var engineNameTarget=appSpecifier.indexOf('premiere')>-1?'NewWorld':engineName
+        console.log('engineNameTarget',engineNameTarget)
+        const xmlCommand = `<eval engine="${engineNameTarget}"><source><![CDATA[${escapedSource}]]></source></eval>`;
         return new Promise((resolve, reject) => {
             const serial = this.core.esdSendDebugMessage(resolvedSpec, xmlCommand, false, 0);
             if (serial === false) return reject(new Error("Failed to send message"));

@@ -13,6 +13,7 @@ Also provide a list of 5-8 realistic execution logs that would appear when this 
 
 Context:
 - Node.js environment has 'fs', 'path', 'axios' and a global 'utils' object.
+- 'utils' includes: 'downloadFile(url, dest)', 'parseXLSX(path)', 'setUI(key, val)'.
 - Creative environment is ExtendScript (ES3). usage: 'app.activeDocument', 'alert()', etc.
 - Injected Helpers in ExtendScript: You have access to '_' (Underscore.js), 'JSON' (JSON polyfill), and 'LOGGER' (e.g., 'LOGGER.log("msg")').
 - UI Schema should match the inputs needed by the Node script.
@@ -25,6 +26,10 @@ Node.js Panel Best Practices:
 - The 'run' function (\`exports.run\`) is the main entry point.
 - You can create additional exports (e.g., \`exports.reset\`, \`exports.processBatch\`, \`exports.uploadResults\`). These will automatically appear as "Quick Action" buttons in the Flow Dashboard grid view, allowing users to trigger specific parts of the workflow independently.
 - Use \`await $.run_jsx(code)\` to execute code from the Creative App Panel.
+
+UI Schema Best Practices:
+- **File/Folder Selection**: Always use \`format: "file"\` or \`format: "folder"\` in the UI Schema for path inputs. This provides a browse button in the UI. Do NOT create manual selection buttons in Node.js for this.
+- Example: \`"csvPath": { "type": "string", "title": "CSV File", "format": "file" }\`
 
 ### SECURITY ANALYSIS
 Before generating code, perform a brief security analysis of the requested automation. Consider:
