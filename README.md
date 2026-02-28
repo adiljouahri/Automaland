@@ -4,7 +4,10 @@
 The AI-native automation platform for Creative Professionals. Design, prompt, and orchestrate Host App & Node.js workflows using a unique TriPanel architecture.
 
 **[🌐 Download](https://automaland.com/)**
-
+</br></br></br>
+<img src="assets/AutomalandGUI.png" alt="Automaland GUI" width="300" height="200">
+<img src="assets/AI provider.png" alt="AI provider" width="300" height="200">
+<img src="assets/AUTOMALAND-photoshop-2.png" alt="AUTOMALAND photoshop" width="300" height="200">
 ## 🚀 Overview
 
 Automaland replaces complex visual node graphs with a streamlined execution model split into three coupled layers:
