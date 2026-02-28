@@ -5,16 +5,16 @@ The AI-native automation platform for Creative Professionals. Design, prompt, an
 
 **[🌐 Download](https://automaland.com/)**
 </br></br></br>
-<img src="assets/AutomalandGUI.png" alt="Automaland GUI" width="300" height="200">
-<img src="assets/AI provider.png" alt="AI provider" width="300" height="200">
-<img src="assets/AUTOMALAND-photoshop-2.png" alt="AUTOMALAND photoshop" width="300" height="200">
+<img src="assets/AutomalandGUI.png" alt="Automaland GUI" width="500" height="300">
+<img src="assets/AI provider.png" alt="AI provider" width="500" height="300">
+<img src="assets/AUTOMALAND-photoshop-2.png" alt="AUTOMALAND photoshop" width="1000" height="400">
 ## 🚀 Overview
 
 Automaland replaces complex visual node graphs with a streamlined execution model split into three coupled layers:
 
 1.  **UI Panel**: Dynamic forms generated from JSON Schema (Draft 7).
 2.  **Node.js Orchestrator**: The "Brain" handling file systems, APIs, networking, and logic.
-3.  **Host App Panel**: The "Hands" executing native ExtendScript (ES3) in Host Apps (Photoshop, Illustrator, InDesign, etc.).
+3.  **Host App Panel**: The "Hands" executing native ExtendScript (ES3) in Host Apps (Photoshop, Illustrator, InDesign, After effect, Premiere Pro etc.).
 
 ## ✨ Features
 
@@ -110,5 +110,5 @@ The Node.js sidecar (`server/`) runs as a background process managed by Tauri. I
 
 
 ## ⚠️ Disclaimer
-Automaland is an independent software tool. It is not affiliated with, endorsed by, authorized by, sponsored by, or in any way officially connected with the software vendors of the supported host applications or their subsidiaries. The names Photoshop, Illustrator, InDesign, and Premiere Pro are registered trademarks of their respective owners.
+Automaland is an independent software tool. It is not affiliated with, endorsed by, authorized by, sponsored by, or in any way officially connected with the software vendors of the supported host applications or their subsidiaries. The names Photoshop Illustrator InDesign After effect and  Premiere Pro  are registered trademarks of their respective owners.
 
