@@ -5,9 +5,9 @@ The AI-native automation platform for Creative Professionals. Design, prompt, an
 
 **[🌐 Download](https://automaland.com/)**
 </br></br></br>
-<img src="assets/AutomalandGUI.png" alt="Automaland GUI" width="500" height="300">
-<img src="assets/AI provider.png" alt="AI provider" width="500" height="300">
-<img src="assets/AUTOMALAND-photoshop-2.png" alt="AUTOMALAND photoshop" width="1000" height="400">
+<img src="assets/AutomalandGUI.png" alt="Automaland GUI" width="400" height="250">
+<img src="assets/AI provider.png" alt="AI provider" width="400" height="250">
+<img src="assets/AUTOMALAND-photoshop-2.png" alt="AUTOMALAND photoshop" width="1000" height="500">
 ## 🚀 Overview
 
 Automaland replaces complex visual node graphs with a streamlined execution model split into three coupled layers:
