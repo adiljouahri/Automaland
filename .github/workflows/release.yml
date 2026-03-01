@@ -35,14 +35,19 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: install frontend dependencies
-        run: npm install
+        run: npm ci || npm install
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: install server dependencies
+        run: cd server && (npm ci || npm install)
+
+      - uses: tauri-apps/tauri-action@v0.5.15
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: app-v__VERSION__ # the action automatically replaces \_\_VERSION\_\_ with the app version
+          tagName: v__VERSION__
           releaseName: "App v__VERSION__"
           releaseBody: "See the assets below to download the latest version."
           releaseDraft: true
           prerelease: false
+          # Explicitly set the tauriScript to avoid yarn conflicts
+          tauriScript: npm run tauri
