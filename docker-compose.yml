@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  tauri-builder:
+    build: .
+    volumes:
+      # Map the local src-tauri/target directory to the container
+      # This allows you to get the built binaries on your host machine
+      - ./src-tauri/target:/app/src-tauri/target
+    # The default command in Dockerfile is 'npm run tauri build'
