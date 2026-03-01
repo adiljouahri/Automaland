@@ -1,28 +1,45 @@
-[package]
-name = "Automaland"
-version = "1.0.9"
-description = "Automaland"
-authors = ["you"]
-edition = "2021"
+name: "publish"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+on:
+  push:
+    tags:
+      - 'v*'
 
-[lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "tauri_app_ts_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, windows-latest]
 
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
 
-[dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-rusqlite = { version = "0.31", features = ["bundled"] }
-tauri-plugin-shell = "2"
-tauri-plugin-dialog = "2"
-chrono = "0.4"
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install frontend dependencies
+        run: npm ci || npm install
+
+      - name: install server dependencies
+        run: cd server && (npm ci || npm install)
+
+      - uses: tauri-apps/tauri-action@v0.5.15
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "App ${{ github.ref_name }}"
+          releaseBody: "See the assets below to download the latest version."
+          releaseDraft: true
+          prerelease: false
+          # Explicitly set the tauriScript to avoid yarn conflicts
+          tauriScript: npm run tauri
