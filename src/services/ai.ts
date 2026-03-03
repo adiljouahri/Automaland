@@ -4,7 +4,7 @@ import { AutomationFlow, AIProvider, AppSettings, LogEntry } from "../types";
 import { SYSTEM_INSTRUCTION as DEFAULT_SYSTEM_INSTRUCTION } from "../constants";
 
 const SECURITY_INSTRUCTION = `
-You are a Cyber Security Auditor specializing in Node.js and Adobe ExtendScript automation.
+You are a Cyber Security Auditor specializing in Node.js and ExtendScript automation.
 Your job is to analyze the provided code for security risks, malware indicators, and logic errors.
 
 ### RISKS TO LOOK FOR:

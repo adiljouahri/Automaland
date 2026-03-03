@@ -1,278 +1,300 @@
 
-# 3-Panel AI Automation App - Architecture & Implementation Guide
+import { GoogleGenAI, Type } from "@google/genai";
+import { AutomationFlow, AIProvider, AppSettings, LogEntry } from "../types";
+import { SYSTEM_INSTRUCTION as DEFAULT_SYSTEM_INSTRUCTION } from "../constants";
 
-## 1. Project Overview & Architecture
+const SECURITY_INSTRUCTION = `
+You are a Cyber Security Auditor specializing in Node.js and ExtendScript automation.
+Your job is to analyze the provided code for security risks, malware indicators, and logic errors.
 
-**Goal:** Build a desktop application using **Tauri (Rust)**, **React**, and a **Node.js Sidecar**. The application replaces visual node graphs with a streamlined "Three Panel" execution model.
+### RISKS TO LOOK FOR:
+1. **Malicious Obfuscation**: Base64 encoded strings, eval() usage, packed code.
+2. **File System Abuse**: Unrestricted deletion (rm -rf /), writing to system directories outside the intended workflow.
+3. **Network Exfiltration**: Sending data to unknown/suspicious IP addresses or domains.
+4. **Infinite Loops**: Logic that freezes the application.
+5. **Logic Errors**: Missing returns, improper async/await usage.
 
-**The Three Panels:**
-1.  **UI Panel:** Generates dynamic forms from JSON Schema. Acts as the input layer.
-2.  **ExtendScript Panel:** Contains Adobe automation code (.jsx) executed via OS bridging.
-3.  **Node.js Panel:** Contains server-side logic, API calls, file handling, and heavy processing.
+### RESPONSE FORMAT
+Return a JSON object with:
+- \`status\`: 'SAFE', 'WARNING', or 'DANGER'.
+- \`score\`: 0 to 100 (100 is perfectly safe).
+- \`analysis\`: A detailed markdown explanation of findings.
+- \`recommendation\`: Short advice on whether to run this code.
+`;
 
-**Core Workflow:**
-*   Users chat with an **AI Architect** to generate code for all three panels.
-*   **Triggers:** Flows can be triggered manually, by File Watchers, API Polling (Cron), or External HTTP Requests.
-*   **State:** A shared state object is passed between the UI, Node.js logic, and ExtendScript.
-*   **Grid Dashboard:** Flows can be viewed as cards in a dashboard. Each card exposes "Quick Actions" derived from the Node.js exports.
+export const verifyAutomationFlow = async (
+  flow: AutomationFlow,
+  settings: AppSettings
+): Promise<{ status: 'SAFE' | 'WARNING' | 'DANGER', score: number, analysis: string, recommendation: string }> => {
+  const { aiApiKey, aiProvider, aiModel, aiBaseUrl } = settings;
 
----
+  if (!aiApiKey) {
+    throw new Error("Missing API Key. Please configure it in Settings.");
+  }
 
-## 2. Technology Stack
+  const userPrompt = `
+  Please analyze this automation flow for security risks.
 
-*   **Frontend:** React, TailwindCSS, Zustand (State), Monaco Editor (Code Editing).
-*   **Theme:** Supports **Light Mode** and **Dark Mode**.
-*   **Desktop Wrapper:** Tauri (v1 or v2).
-*   **Backend:** Node.js Express Server (bundled as a Tauri Sidecar).
-*   **Security:** AES-256 Encryption for Environment Variables.
-*   **Database:** `lowdb` (JSON file) or `sqlite3` for storing flows, history, and settings locally.
+  **Node.js Code:**
+  \`\`\`javascript
+  ${flow.nodeCode}
+  \`\`\`
 
----
+  **Host App Code (ExtendScript):**
+  \`\`\`javascript
+  ${flow.appCode}
+  \`\`\`
+  `;
 
-## 3. The Three Panels (Detailed Specification)
+  if (aiProvider === 'gemini') {
+    const ai = new GoogleGenAI({ apiKey: aiApiKey });
+    const responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          status: { type: Type.STRING, enum: ["SAFE", "WARNING", "DANGER"] },
+          score: { type: Type.NUMBER },
+          analysis: { type: Type.STRING },
+          recommendation: { type: Type.STRING }
+        },
+        required: ["status", "score", "analysis", "recommendation"]
+    };
 
-### Panel 1: UI Generation (Input)
-*   **Input:** JSON Schema (Draft 7).
-*   **Rendering:** Use `@rjsf/core` or a custom recursive renderer.
-*   **Behavior:**
-    *   When the flow starts, this form captures user input.
-    *   These inputs are accessible in other panels as `triggerData` or `uiState`.
-*   **AI Instruction:** AI generates valid JSON Schema based on user requirements (e.g., "Ask for a file and a text prompt").
+    const response = await ai.models.generateContent({
+        model: aiModel || 'gemini-1.5-pro',
+        contents: userPrompt,
+        config: {
+            systemInstruction: SECURITY_INSTRUCTION,
+            responseMimeType: "application/json",
+            responseSchema: responseSchema,
+        }
+    });
 
-### Panel 2: ExtendScript (Adobe Automation)
-*   **Environment:** Adobe ExtendScript (ES3).
-*   **Injected Helpers:**
-    *   `_`: Underscore.js (polyfill for ES3).
-    *   `LOGGER`: Global object with `.init(name)` and `.log(msg)`. Logs must stream back to the React UI.
-    *   `ENV`: Object containing decrypted environment variables.
-*   **Execution:**
-    *   The Node.js Sidecar writes the code to a temporary `.jsx` file.
-    *   **Mac:** Executes via `osascript -e 'tell application "Adobe Photoshop 2024" to do javascript file "..."'`.
-    *   **Windows:** Executes via COM Object or passing the file argument to the executable.
-*   **Mocking:** Create a "Dummy API" mode where the code runs but API calls are mocked for testing without Adobe apps installed.
+    const text = response.text;
+    if (!text) throw new Error("No response from AI Auditor");
+    return JSON.parse(text);
+  }
 
-### Panel 3: Node.js Script (The Orchestrator)
-*   **Environment:** Node.js VM Sandbox (vm2 or isolated-vm).
-*   **Capabilities:**
-    *   Full access to `fs` (FileSystem).
-    *   Access to installed NPM libraries.
-    *   Access to `state` (Shared memory).
-*   **Quick Actions & Exports:**
-    *   **Grid View Integration:** Any function exported via `exports.myAction = ...` is automatically detected by the UI.
-    *   These exports appear as buttons on the Flow Card in Grid View and in the Quick Actions bar in Editor View.
-    *   The default entry point is `exports.run`.
-    *   **Best Practice:** Always ensure `triggerData` properties have default values assigned inside the function if they are `undefined` (e.g., `const folder = triggerData.folder || './default';`).
-*   **Helpers:**
-    *   `utils.downloadFile(url, dest)`
-    *   `utils.zip(source, dest)`
-    *   `utils.read(path)`
-    *   `utils.upload(url, filePath)`
+  // Fallback for OpenAI/Claude
+  let url = '';
+  let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let body: any = {};
 
----
+  if (aiProvider === 'openai' || aiProvider === 'custom') {
+    url = aiBaseUrl || 'https://api.openai.com/v1/chat/completions';
+    headers['Authorization'] = `Bearer ${aiApiKey}`;
+    body = {
+      model: aiModel,
+      messages: [
+        { role: 'system', content: SECURITY_INSTRUCTION + "\nReturn ONLY valid JSON." },
+        { role: 'user', content: userPrompt }
+      ],
+      response_format: { type: 'json_object' }
+    };
+  } else if (aiProvider === 'claude') {
+    url = 'https://api.anthropic.com/v1/messages';
+    headers['x-api-key'] = aiApiKey;
+    headers['anthropic-version'] = '2023-06-01';
+    body = {
+      model: aiModel,
+      system: SECURITY_INSTRUCTION,
+      messages: [{ role: 'user', content: userPrompt }],
+      max_tokens: 2048
+    };
+  }
 
-## 4. Automation, Triggers & Chaining
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  });
 
-### A. Watchers
-The Node.js sidecar runs a persistent process manager.
-1.  **File Watcher:** Uses `chokidar`. Watch folder -> On Add/Change -> Trigger Flow.
-2.  **API Watcher:** `setInterval` (Min 1 min). Polls an external API. If response matches criteria -> Trigger Flow.
+  if (!res.ok) {
+    throw new Error("AI Verification Failed");
+  }
 
-### B. External API Trigger
-The application exposes a local endpoint: `POST http://localhost:3000/api/trigger/:flowId`
-*   **Body:** `{ "uiVariables": { ... }, "secret": "..." }`
-*   **Usage:** Allows external tools (Zapier, Postman, custom scripts) to run the desktop automation.
+  const json = await res.json();
+  let content = '';
 
-### C. Process Chaining (Async)
-The API/Runner must support sequential execution defined by the user or API request.
-*   **Scenario:** Trigger "Button A" (Generate Image) -> Wait -> Trigger "Button B" (Photoshop Mockup).
-*   **Implementation:**
-    ```javascript
-    // Inside Node.js Panel
-    const resultA = await flow.run('ButtonA', { input: '...' });
-    state.imagePath = resultA.path; // Store in shared state
-    await flow.run('ButtonB', { input: state.imagePath });
-    ```
+  if (aiProvider === 'openai' || aiProvider === 'custom') {
+    content = json.choices[0].message.content;
+  } else if (aiProvider === 'claude') {
+    content = json.content[0].text;
+  }
 
----
+  return JSON.parse(content);
+};
 
-## 5. Security & Environment Variables
+export const generateAutomationFlow = async (
+  prompt: string, 
+  modelNameOrSettings: string | AppSettings,
+  apiKeyOrFlow?: string | AutomationFlow,
+  currentFlowOrLogs?: AutomationFlow | LogEntry[] | undefined,
+  settingsOrLogs?: AppSettings | LogEntry[] | undefined,
+  contextLogs?: LogEntry[]
+): Promise<Partial<AutomationFlow> & { explanation?: string }> => {
+  
+  // Handle polymorphic arguments
+  let aiSettings: AppSettings;
+  let flowContext: AutomationFlow | undefined;
+  let logsContext: LogEntry[] | undefined = undefined;
+  
+  if (typeof modelNameOrSettings === 'object') {
+      aiSettings = modelNameOrSettings as AppSettings;
+      flowContext = apiKeyOrFlow as AutomationFlow | undefined;
+      
+      // Determine where logs are passed (App.tsx sends them as 5th argument, undefined as 4th)
+      if (Array.isArray(settingsOrLogs)) {
+          logsContext = settingsOrLogs as LogEntry[];
+      } else if (Array.isArray(currentFlowOrLogs)) {
+          logsContext = currentFlowOrLogs as LogEntry[];
+      }
+  } else {
+      // Legacy call support
+      aiSettings = {
+          aiApiKey: apiKeyOrFlow as string,
+          aiModel: modelNameOrSettings as string,
+          aiProvider: 'gemini',
+          serverUrl: '', strapiUrl: '', theme: 'dark'
+      };
+      flowContext = currentFlowOrLogs as AutomationFlow | undefined;
+      logsContext = contextLogs;
+  }
 
-### Requirements
-1.  **Login:** Simple password protection on app startup.
-    *   Env Var: `SKIP_AUTH=true` to bypass during dev.
-2.  **Encryption:**
-    *   User enters API Keys (OpenAI, Shopify, Custom).
-    *   App encrypts them using a master key (derived from login password or system keychain) before saving to disk.
-    *   Decrypted *only* in memory at runtime and injected into the VM/ExtendScript context.
+  const { aiApiKey, aiProvider, aiModel, aiBaseUrl } = aiSettings;
 
----
+  if (!aiApiKey) {
+    throw new Error("Missing API Key");
+  }
 
-## 6. Backend API (Node.js Sidecar) Specification
+  // Construct Context Block
+  let contextBlock = "";
+  if (flowContext) {
+      contextBlock = `
+### CURRENT FLOW CONTEXT
+**Target App:** ${flowContext.targetApp}
 
-The sidecar is the heart of the app. It must be bundled using `pkg` for the Tauri binary.
+**1. Node.js Code (Current):**
+\`\`\`javascript
+${flowContext.nodeCode}
+\`\`\`
 
-### Swagger / API Definition
+**2. Host App Code (Current):**
+\`\`\`javascript
+${flowContext.appCode}
+\`\`\`
 
-```yaml
-openapi: 3.0.0
-info:
-  title: AI Flow Runner API
-  version: 1.0.0
-paths:
-  /api/execute:
-    post:
-      summary: Run a specific code block (Node or ExtendScript)
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                type: 
-                  type: string
-                  enum: [nodejs, extendscript]
-                code:
-                  type: string
-                context:
-                  type: object
-                envVars:
-                  type: object
-  /api/install-lib:
-    post:
-      summary: Install an NPM package dynamically
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                packageName: 
-                  type: string
-  /api/trigger/{flowId}:
-    post:
-      summary: Trigger a full 3-panel flow
-      parameters:
-        - name: flowId
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                inputs:
-                  type: object
-                  description: Matches the UI Schema keys
-```
+**3. UI Schema (Current):**
+\`\`\`json
+${flowContext.uiSchema}
+\`\`\`
+`;
+  }
 
-### Prebuilt Helper Functions (Injected into Node.js Context)
+  // Add Log Context if available
+  if (logsContext && logsContext.length > 0) {
+      const recentLogs = logsContext.slice(-20);
+      const logString = recentLogs.map(l => `[${l.timestamp}] [${l.source}] ${l.type.toUpperCase()}: ${l.message}`).join('\n');
+      contextBlock += `
+### RECENT EXECUTION LOGS
+Use these logs to debug issues. If there are errors, fix the code accordingly.
+\`\`\`
+${logString}
+\`\`\`
+`;
+  }
 
-1.  **`utils.downloadFile(url, destPath)`**
-    *   Streams file to disk. Handles 302 redirects.
-2.  **`utils.zipFolder(sourceDir, destFile)`**
-    *   Uses `archiver` library.
-3.  **`utils.readFile(path, encoding)`**
-    *   Safe wrapper around `fs.readFile`.
-4.  **`utils.shopifyRequest(store, token, query)`**
-    *   Pre-configured fetch wrapper for Shopify GraphQL/Admin API.
+  const userPrompt = flowContext 
+    ? `Request: "${prompt}".\n\n${contextBlock}\n\nBased on the Request and the Context above, update the flow. Fix any errors seen in the logs. Ensure code is properly formatted with newlines. Remember to use 'return' in $.run_jsx calls.`
+    : `Create a new automation flow for: "${prompt}". Ensure code is properly formatted with newlines. Remember to use 'return' in $.run_jsx calls.`;
 
----
+  if (aiProvider === 'gemini') {
+    const ai = new GoogleGenAI({ apiKey: aiApiKey });
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING },
+        explanation: { type: Type.STRING },
+        uiSchema: { type: Type.STRING }, 
+        nodeCode: { type: Type.STRING },
+        appCode: { type: Type.STRING },
+        targetApp: { type: Type.STRING },
+        simulatedLogs: { type: Type.ARRAY, items: { type: Type.STRING } }
+      },
+      required: ["name", "uiSchema", "nodeCode", "appCode", "simulatedLogs", "explanation"]
+    };
 
-## 7. AI Chat Architect Features
+    const response = await ai.models.generateContent({
+      model: aiModel || 'gemini-1.5-pro', 
+      contents: userPrompt,
+      config: {
+        systemInstruction: aiSettings.systemInstruction || DEFAULT_SYSTEM_INSTRUCTION,
+        responseMimeType: "application/json",
+        responseSchema: responseSchema,
+      }
+    });
 
-The chat interface generates the code for the panels.
-
-*   **Context Awareness:** When the user asks to "Change the script to handle PDFs", the AI sends the *current* content of the Node.js panel in the context window.
-*   **Multi-File Generation:** The AI can return a JSON object containing updates for all 3 panels simultaneously.
-    ```json
-    {
-      "ui": { ...jsonSchema... },
-      "node": "const fs = require('fs')...",
-      "adobe": "var doc = app.activeDocument..."
+    const text = response.text;
+    if (!text) throw new Error("No response from AI");
+    
+    const parsed = JSON.parse(text);
+    if (typeof parsed.uiSchema === 'object') {
+        parsed.uiSchema = JSON.stringify(parsed.uiSchema, null, 2);
     }
-    ```
-*   **Settings:**
-    *   User provides their own API Key (Gemini/OpenAI).
-    *   Model selection (Gemini 3 Series).
-*   **Action Recognition:** The AI is instructed to break down complex workflows into discrete named exports in the Node.js file (e.g., `exports.downloadAssets`, `exports.processImages`), which become clickable actions in the UI.
-*   **Security Analysis:** The AI is instructed to perform a brief security analysis of the requested automation (checking for directory traversal, arbitrary code execution, and sensitive data handling) and include it in the explanation.
+    return parsed;
+  }
 
----
+  // Fallback for OpenAI/Claude
+  let url = '';
+  let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let body: any = {};
 
-## 8. Development & Build Instructions
+  if (aiProvider === 'openai' || aiProvider === 'custom') {
+    url = aiBaseUrl || 'https://api.openai.com/v1/chat/completions';
+    headers['Authorization'] = `Bearer ${aiApiKey}`;
+    body = {
+      model: aiModel,
+      messages: [
+        { role: 'system', content: (aiSettings.systemInstruction || DEFAULT_SYSTEM_INSTRUCTION) + "\nReturn ONLY valid JSON." },
+        { role: 'user', content: userPrompt }
+      ],
+      response_format: { type: 'json_object' }
+    };
+  } else if (aiProvider === 'claude') {
+    url = 'https://api.anthropic.com/v1/messages';
+    headers['x-api-key'] = aiApiKey;
+    headers['anthropic-version'] = '2023-06-01';
+    body = {
+      model: aiModel,
+      system: aiSettings.systemInstruction || DEFAULT_SYSTEM_INSTRUCTION,
+      messages: [{ role: 'user', content: userPrompt }],
+      max_tokens: 4096
+    };
+  }
 
-### Prerequisites
-*   Node.js v18+
-*   Rust (latest stable)
-*   Visual Studio Build Tools (Windows) or Xcode (Mac)
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  });
 
-### Folder Structure
-```
-/
-├── src/              # React Frontend
-├── src-tauri/        # Rust Configuration
-├── server/           # Node.js Sidecar
-│   ├── index.js      # Main Entry
-│   ├── helpers/      # Utility functions
-│   └── package.json
-└── package.json
-```
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error?.message || "AI Request failed");
+  }
 
-### Step 1: Develop (Hot Reload)
-1.  **Setup Server:** `cd server && npm install`
-2.  **Build Server Binary:**
-    *   Mac: `npm run build:tauri:mac` (Uses `pkg`)
-    *   Win: `npm run build:tauri:win`
-3.  **Run App:** `npm run tauri dev`
+  const json = await res.json();
+  let content = '';
 
-### Step 2: Testing Strategy
+  if (aiProvider === 'openai' || aiProvider === 'custom') {
+    content = json.choices[0].message.content;
+  } else if (aiProvider === 'claude') {
+    content = json.content[0].text;
+  }
 
-**A. Unit Testing (Node Server):**
-*   Use `jest`.
-*   Mock `fs` to test file watchers.
-*   Mock `child_process` to test ExtendScript execution commands.
+  const parsedContent = JSON.parse(content);
+  if (typeof parsedContent.uiSchema === 'object') {
+      parsedContent.uiSchema = JSON.stringify(parsedContent.uiSchema, null, 2);
+  }
 
-**B. Integration Testing (Flows):**
-*   Create a "Test Flow" that:
-    1.  UI: Accepts a text string.
-    2.  Node: Writes string to a file `test.txt`.
-    3.  ExtendScript: Reads `test.txt` and logs it.
-*   Run this flow via the API Trigger `/api/trigger/test-flow`.
-*   Assert that the log contains the input string.
-
-**C. Manual Testing:**
-*   **Watch Folder:** Drop a file in a watched folder -> Verify Chat Log updates.
-*   **Library:** Type `axios` in library manager -> Click Install -> Verify usage in Node.js panel.
-
-### Step 3: Production Build
-
-**Target: Mac (Universal/Apple Silicon)**
-```bash
-# 1. Build Sidecar
-cd server
-npm install
-npm run build:tauri:mac-arm 
-
-# 2. Build App
-cd ..
-npm install
-npm run tauri build
-```
-*Output:* `src-tauri/target/release/bundle/dmg/`
-
-**Target: Windows**
-```bash
-# 1. Build Sidecar
-cd server
-npm install
-npm run build:tauri:win
-
-# 2. Build App
-cd ..
-npm install
-npm run tauri build
-```
-*Output:* `src-tauri/target/release/bundle/msi/`
+  return parsedContent;
+};

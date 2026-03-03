@@ -1,4 +1,3 @@
-
 "use strict";
 const fastXMLParser = require("fast-xml-parser");
 const ESDCore = require("./ESDCore");
@@ -11,4 +10,7 @@ const XML_OPTIONS = {
 };
 
 function WrapWithCDATA(content) {
-    return `<![CDATA[${content.replace(/]]>/g, "]]
+    return `<![CDATA[${content.replace(/]]>/g, "]]]]><![CDATA[>")}]]>`;
+}
+
+module.exports = { WrapWithCDATA };

@@ -24,8 +24,8 @@ interface SettingsModalProps {
 
 const PROVIDER_MODELS: Record<AIProvider, string[]> = {
     gemini: [
-        'gemini-3-flash-preview',        // High-speed generation
-        'gemini-3-pro-preview',          // New Flagship (multimodal & vibe-coding)
+        'gemini-3-flash',        // High-speed generation
+        'gemini-3-pro',          // New Flagship (multimodal & vibe-coding)
         'gemini-3-deep-think',   // February 2026 release for reasoning
         'gemini-2.5-pro',        // Stable enterprise workhorse
         'gemini-2.5-flash',      // Agentic-optimized low latency
@@ -218,7 +218,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <div className={`p-4 rounded border ${cardBg}`}>
                             <div className="flex items-center gap-2 mb-2">
                                 <Cpu className="w-4 h-4 text-blue-500" />
-                                <span className={`text-sm font-bold ${inputText}`}>ExtendScript (Adobe) Log</span>
+                                <span className={`text-sm font-bold ${inputText}`}>ExtendScript Log</span>
                             </div>
                             <div className={`text-xs font-mono p-2 rounded break-all select-all cursor-text ${isDark ? 'bg-black/50 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
                                 {logPaths?.adobeLog || "Unavailable"}
