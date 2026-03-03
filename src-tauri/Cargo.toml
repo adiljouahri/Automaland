@@ -1,6 +1,6 @@
 [package]
 name = "Automaland"
-version = "0.0.16"
+version = "0.0.18"
 description = "Automaland"
 authors = ["you"]
 edition = "2021"
