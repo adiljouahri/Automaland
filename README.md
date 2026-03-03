@@ -9,7 +9,7 @@ The AI-native automation platform for Creative Professionals. Design, prompt, an
 <img src="assets/AI provider.png" alt="AI provider" width="400" height="250">
 <img src="assets/AUTOMALAND-photoshop-2.png" alt="AUTOMALAND photoshop" width="1000" height="500">
 ## 🚀 Overview
-
+## 🚀 Phototshop Illustrator Premiere Pro Indesign After Effect...
 Automaland replaces complex visual node graphs with a streamlined execution model split into three coupled layers:
 
 1.  **UI Panel**: Dynamic forms generated from JSON Schema (Draft 7).
