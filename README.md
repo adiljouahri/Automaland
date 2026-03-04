@@ -2,7 +2,8 @@
 # Automaland
 
 The AI-native automation platform for Creative Professionals. Design, prompt, and orchestrate Host App & Node.js workflows using a unique TriPanel architecture.</br>
-[![Video Thumbnail](https://img.youtube.com)](https://www.youtube.com/watch?v=j72bsdB_EC4)</br></br>
+[![Video Intro](https://img.youtube.com/vi/j72bsdB_EC4/0.jpg)](https://www.youtube.com/watch?v=j72bsdB_EC4)
+
 **[🌐 Download](https://automaland.com/)**</br>
 **[🌐 Discord](https://discord.gg/mPyTFVtr)**</br>
 </br></br></br>
