@@ -24,9 +24,9 @@ function App() {
     return {
       aiApiKey: '',
       aiProvider: 'gemini',
-      aiModel: 'gemini-3-flash-preview',
+      aiModel: 'gemini-3-pro-preview',
       serverUrl: 'http://localhost:3001',
-      strapiUrl: 'https://tripanelserver-9a123e242287.herokuapp.com',
+      strapiUrl: 'http://localhost:1337',
       theme: 'dark'
     };
   });
@@ -94,6 +94,7 @@ function App() {
   
   const strapi = useMemo(() => new StrapiService(settings.strapiUrl), [settings.strapiUrl]);
   const [user, setUser] = useState<User | null>(null);
+  const [skipLogin, setSkipLogin] = useState(() => localStorage.getItem('skip_login') === 'true');
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isPollingAuth, setIsPollingAuth] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -693,6 +694,8 @@ function App() {
   const handleLogout = () => {
     strapi.logout();
     setUser(null);
+    localStorage.removeItem('skip_login');
+    setSkipLogin(false);
     setFlows([{
         id: 'default-flow-1',
         flowId: 'default-uuid-1',
@@ -1129,7 +1132,7 @@ ${result.analysis}
      );
   }
 
-  if (!user) {
+  if (!user && !skipLogin) {
     // ... Login UI ...
     return (
       <div className={`flex items-center justify-center min-h-screen ${bgMain} p-6`}>
@@ -1162,6 +1165,11 @@ ${result.analysis}
                 <div className="flex justify-between mt-4">
                     <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="text-sm text-blue-500 hover:underline">{authMode === 'login' ? "New here? Register" : "Have an account? Login"}</button>
                     <button onClick={() => setShowManualToken(true)} className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1"><Key className="w-3 h-3"/> Paste Token</button>
+                </div>
+                <div className={`mt-6 pt-6 border-t text-center ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                    <button onClick={() => { localStorage.setItem('skip_login', 'true'); setSkipLogin(true); }} className={`text-sm underline transition-colors ${isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}>
+                        Skip login and continue as guest
+                    </button>
                 </div>
                 </>
             ) : (
@@ -1462,7 +1470,7 @@ ${result.analysis}
                 )}
             </div>
 
-            <div className="flex items-center gap-2 px-2 py-1 bg-slate-800/50 rounded-lg border border-slate-700"><UserIcon className="w-4 h-4 text-blue-400" /><span className="text-xs font-medium">{user?.username}</span><button onClick={handleLogout} className="text-red-400 hover:text-red-500"><LogOut className="w-3.5 h-3.5" /></button></div>
+            <div className="flex items-center gap-2 px-2 py-1 bg-slate-800/50 rounded-lg border border-slate-700"><UserIcon className="w-4 h-4 text-blue-400" /><span className="text-xs font-medium">{user?.username || 'Guest'}</span><button onClick={handleLogout} className="text-red-400 hover:text-red-500" title={user ? "Logout" : "Login"}><LogOut className="w-3.5 h-3.5" /></button></div>
             <button onClick={() => setShowSettings(true)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-800"><Settings className="w-5 h-5" /></button>
             
             {activeFlow && (
@@ -1525,14 +1533,14 @@ ${result.analysis}
                     language="javascript" 
                     icon={<ImageIcon className="w-4 h-4" />} 
                     code={activeFlow.appCode} 
-                    readonly={false} 
-                    onChange={(code) => updateActiveFlow({ appCode: code })} 
+                    readonly={activeFlow.isPublic} 
+                    onChange={(code) => { if (!activeFlow.isPublic) updateActiveFlow({ appCode: code }); }} 
                     theme={settings.theme} 
                     extraHeaderContent={
                     <div className="flex items-center gap-2">
                         <select 
                             value={activeFlow.targetApp || ''}
-                            disabled={!isOwner} 
+                            disabled={!isOwner || activeFlow.isPublic} 
                             onPointerDown={(e) => e.stopPropagation()} 
                             onChange={(e) => {
                                 const newVal = e.target.value;
