@@ -24,9 +24,9 @@ function App() {
     return {
       aiApiKey: '',
       aiProvider: 'gemini',
-      aiModel: 'gemini-3-pro-preview',
+      aiModel: 'gemini-3-flash-preview',
       serverUrl: 'http://localhost:3001',
-      strapiUrl: 'http://localhost:1337',
+      strapiUrl: 'https://tripanelserver-9a123e242287.herokuapp.com',
       theme: 'dark'
     };
   });
