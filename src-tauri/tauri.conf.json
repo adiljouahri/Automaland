@@ -2,10 +2,10 @@
 {
   "productName": "Automaland",
   "version": "0.1.0",
-  "identifier": "com.automaland.app",
+  "identifier": "com.automaland.desktop",
   "build": {
     "beforeDevCommand": "npm --prefix server run bundle && npm run dev",
-    "beforeBuildCommand": "npm --prefix server run bundle && npm run build",
+    "beforeBuildCommand": "npm --prefix server install && npm --prefix server run bundle && npm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
