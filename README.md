@@ -4,7 +4,7 @@
 The AI-native automation platform for Creative Professionals. Design, prompt, and orchestrate Host App & Node.js workflows using a unique TriPanel architecture.</br>
 [![Video Intro](https://img.youtube.com/vi/j72bsdB_EC4/0.jpg)](https://www.youtube.com/watch?v=j72bsdB_EC4)
 
-**[🌐 Download](https://automaland.com/)**</br>
+**[🌐 Download](https://github.com/adiljouahri/Automaland/releases)**</br>
 **[🌐 Discord](https://discord.gg/mPyTFVtr)**</br>
 </br></br></br>
 <img src="assets/AutomalandGUI.png" alt="Automaland GUI" width="400" height="250">
@@ -113,4 +113,5 @@ The Node.js sidecar (`server/`) runs as a background process managed by Tauri. I
 
 ## ⚠️ Disclaimer
 Automaland is an independent software tool. It is not affiliated with, endorsed by, authorized by, sponsored by, or in any way officially connected with the software vendors of the supported host applications or their subsidiaries. The names Photoshop Illustrator InDesign After effect and  Premiere Pro  are registered trademarks of their respective owners.
+
 
