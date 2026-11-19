@@ -46,7 +46,7 @@ Automaland replaces complex visual node graphs with a streamlined execution mode
 
 1.  **Clone the repository**
     ```bash
-    git clone https://github.com/Starttoaster/Automaland.git
+    [git clone https://github.com/Starttoaster/Automaland.git](https://github.com/adiljouahri/Automaland.git ()
     cd Automaland
     ```
 
